@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- Required to use Virtualization.framework at all. Ad-hoc signing grants
+         this for locally-built binaries on Apple silicon; a Developer ID build
+         would need the matching capability on the provisioning profile. -->
+    <key>com.apple.security.virtualization</key>
+    <true/>
+
+    <!-- vmnet-backed container networking (VmnetNetwork, macOS 26+). -->
+    <key>com.apple.vm.networking</key>
+    <true/>
+
+    <!-- App Sandbox is deliberately OFF. The sandbox cannot host a VM that
+         needs vmnet plus arbitrary writable block devices; turning it on breaks
+         the guest before it boots. -->
+</dict>

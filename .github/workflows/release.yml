@@ -1,0 +1,95 @@
+name: release
+
+# Builds cs-OS on a GitHub macOS runner so no local Xcode, toolchain, or sudo
+# is ever required. Tag a version and the artifact publishes itself.
+#
+#   git tag v0.1.0 && git push --tags
+#
+# The runner has Xcode preinstalled with its license already accepted, which is
+# the whole reason this exists.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to build (without the leading v)"
+        required: true
+        default: "0.1.0"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve version
+        id: ver
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "version=${{ inputs.version }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Select Xcode 26
+        run: sudo xcode-select -s /Applications/Xcode_26.app
+
+      # The kernel is a stable third-party artifact, so cache it aggressively —
+      # it is a ~277 MB download for a single file.
+      - name: Cache Linux assets
+        id: assets-cache
+        uses: actions/cache@v4
+        with:
+          path: .build/assets
+          key: csos-assets-kata3.17.0-cz0.33.3-v1
+
+      # CSOS_INITFS_URL must point at a prebuilt initfs.ext4. The runner cannot
+      # build one itself: that needs nested virtualization, which GitHub's macOS
+      # runners do not provide. Build it once on a real Mac, attach it to a
+      # release, and set these two repo variables.
+      - name: Build Linux assets
+        if: steps.assets-cache.outputs.cache-hit != 'true'
+        env:
+          CSOS_INITFS_URL: ${{ vars.CSOS_INITFS_URL }}
+          CSOS_INITFS_SHA256: ${{ vars.CSOS_INITFS_SHA256 }}
+        run: |
+          if [ -z "$CSOS_INITFS_URL" ]; then
+            echo "::error::CSOS_INITFS_URL repo variable is not set. See README > Bootstrapping the initfs."
+            exit 1
+          fi
+          bash scripts/fetch-assets.sh
+
+      - name: Cache SwiftPM dependencies
+        uses: actions/cache@v4
+        with:
+          path: .build/checkouts
+          key: spm-${{ hashFiles('Package.resolved', 'Package.swift') }}
+          restore-keys: spm-
+
+      - name: Build and bundle
+        run: make bundle VERSION=${{ steps.ver.outputs.version }}
+
+      - name: Archive
+        run: make archive VERSION=${{ steps.ver.outputs.version }}
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          V="${{ steps.ver.outputs.version }}"
+          gh release create "v${V}" \
+            "dist/cs-os-v${V}-arm64.zip" \
+            "dist/cs-os-v${V}-arm64.zip.sha256" \
+            "dist/latest.json" \
+            --title "cs-OS v${V}" \
+            --notes-file CHANGELOG.md \
+            --clobber || \
+          gh release upload "v${V}" \
+            "dist/cs-os-v${V}-arm64.zip" \
+            "dist/cs-os-v${V}-arm64.zip.sha256" \
+            "dist/latest.json" --clobber

@@ -15,9 +15,10 @@ let package = Package(
         .executableTarget(
             name: "csos",
             dependencies: [
+                // ContainerizationError ships inside the Containerization
+                // library product, so it must not be listed separately.
                 .product(name: "Containerization", package: "containerization"),
                 .product(name: "ContainerizationOS", package: "containerization"),
-                .product(name: "ContainerizationError", package: "containerization"),
                 .product(name: "SwiftTerm", package: "SwiftTerm"),
             ],
             path: "Sources/csos",

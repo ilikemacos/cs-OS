@@ -81,7 +81,7 @@ actor ContainerBackend: LinuxBackend {
 
         // Resolves the guest init from the registry on first launch and caches
         // it in the image store; subsequent launches are offline.
-        let manager = try await ContainerManager(
+        var manager = try await ContainerManager(
             kernel: kernel,
             initfsReference: Self.initfsReference,
             root: assets.stateRoot,
@@ -106,7 +106,7 @@ actor ContainerBackend: LinuxBackend {
             config.process.setTerminalIO(terminal: child)
             config.process.arguments = ["/bin/sh", "-l"]
             config.process.workingDirectory = "/root"
-            config.process.environment = [
+            config.process.environmentVariables = [
                 "TERM=xterm-256color",
                 "PS1=\\[\\e[38;5;110m\\]\\w\\[\\e[0m\\] $ ",
                 "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",

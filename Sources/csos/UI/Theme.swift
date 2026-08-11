@@ -26,7 +26,7 @@ enum Theme {
 
     /// Bundled subset of JetBrains Mono — the same face the site sets code in.
     /// Falls back to the system mono so a stripped dev build still renders.
-    static let monospace: NSFont = {
+    nonisolated(unsafe) static let monospace: NSFont = {
         NSFont(name: "JetBrains Mono NL", size: 13)
             ?? NSFont(name: "JetBrainsMono-Regular", size: 13)
             ?? NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
@@ -63,9 +63,9 @@ enum Theme {
 
     /// Status colors are the one place hue is allowed — these encode state, not
     /// brand, and the site uses the same restraint on its own status pills.
-    static let statusRunning = Color(srgbRed: 0.42, green: 0.80, blue: 0.55, opacity: 1)
-    static let statusBooting = Color(srgbRed: 0.90, green: 0.71, blue: 0.36, opacity: 1)
-    static let statusFailed  = Color(srgbRed: 0.90, green: 0.44, blue: 0.44, opacity: 1)
+    static let statusRunning = Color(.sRGB, red: 0.42, green: 0.80, blue: 0.55, opacity: 1)
+    static let statusBooting = Color(.sRGB, red: 0.90, green: 0.71, blue: 0.36, opacity: 1)
+    static let statusFailed  = Color(.sRGB, red: 0.90, green: 0.44, blue: 0.44, opacity: 1)
 
     /// --radius: .75rem
     static let cornerRadius: CGFloat = 12

@@ -34,37 +34,43 @@ struct TerminalPane: NSViewRepresentable {
         if view.font != Theme.monospace { view.font = Theme.monospace }
     }
 
-    @MainActor
+    /// `TerminalViewDelegate` is a nonisolated protocol, so the coordinator
+    /// cannot be `@MainActor` without the conformance crossing isolation.
+    /// Instead it is nonisolated and every callback re-enters the main actor via
+    /// `assumeIsolated` — sound because AppKit only ever calls these on main.
     final class Coordinator: NSObject, TerminalViewDelegate {
-        private let session: Session
-        private weak var view: TerminalView?
-        private var pump: Task<Void, Never>?
+        private nonisolated(unsafe) let session: Session
+        private nonisolated(unsafe) weak var view: TerminalView?
+        private nonisolated(unsafe) var pump: Task<Void, Never>?
 
         init(session: Session) {
             self.session = session
             super.init()
         }
 
+        @MainActor
         func attach(_ view: TerminalView) {
             self.view = view
             guard pump == nil else { return }
 
-            pump = Task { [weak self] in
+            pump = Task { @MainActor [weak self] in
+                guard let self else { return }
                 do {
-                    try await session.startIfNeeded()
+                    try await self.session.startIfNeeded()
                 } catch {
-                    self?.writeBanner(error)
+                    self.writeBanner(error)
                     return
                 }
-                guard let stream = await session.backend?.output else { return }
+                guard let stream = self.session.backend?.output else { return }
                 for await chunk in stream {
-                    self?.view?.feed(byteArray: chunk)
+                    self.view?.feed(byteArray: chunk)
                 }
             }
         }
 
         /// Surface backend failures in the terminal itself rather than an
         /// alert sheet — it keeps the failure next to the context.
+        @MainActor
         private func writeBanner(_ error: Error) {
             let text = "\r\n\u{1b}[31mcs-OS:\u{1b}[0m \(error.localizedDescription)\r\n"
             view?.feed(text: text)
@@ -73,24 +79,37 @@ struct TerminalPane: NSViewRepresentable {
         // MARK: TerminalViewDelegate
 
         func send(source: TerminalView, data: ArraySlice<UInt8>) {
-            Task { await session.backend?.write(data) }
+            let bytes = Array(data)
+            MainActor.assumeIsolated {
+                let backend = session.backend
+                Task { await backend?.write(bytes[...]) }
+            }
         }
 
         func sizeChanged(source: TerminalView, newCols: Int, newRows: Int) {
-            Task { await session.backend?.resize(cols: newCols, rows: newRows) }
+            MainActor.assumeIsolated {
+                let backend = session.backend
+                Task { await backend?.resize(cols: newCols, rows: newRows) }
+            }
         }
 
         func setTerminalTitle(source: TerminalView, title: String) {
-            session.title = title.isEmpty ? session.defaultTitle : title
+            MainActor.assumeIsolated {
+                session.title = title.isEmpty ? session.defaultTitle : title
+            }
         }
 
         func hostCurrentDirectoryUpdate(source: TerminalView, directory: String?) {
-            session.workingDirectory = directory
+            MainActor.assumeIsolated {
+                session.workingDirectory = directory
+            }
         }
 
         func scrolled(source: TerminalView, position: Double) {
             // Drives the chrome parallax. Clamped hard — see GlassChrome.
-            session.scrollPosition = position
+            MainActor.assumeIsolated {
+                session.scrollPosition = position
+            }
         }
 
         func requestOpenLink(source: TerminalView, link: String, params: [String: String]) {

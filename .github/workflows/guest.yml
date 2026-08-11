@@ -1,0 +1,159 @@
+name: guest
+
+# Cross-builds the Linux guest (kernel + initramfs + Alpine rootfs) for both
+# architectures and publishes one tarball as a `guest-*` release.
+#
+# This exists so the macOS side never needs a Linux toolchain, Docker, or sudo:
+# `make guest` just downloads the result of this workflow.
+#
+#   gh workflow run guest.yml -f version=0.1.0
+#
+# Guest releases are versioned independently of the app — the kernel changes far
+# less often than the UI, and rebuilding it on every app release would waste
+# ~20 minutes of CI per tag.
+
+on:
+  push:
+    tags: ["guest-v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Guest version (without the leading v)"
+        required: true
+        default: "0.1.0"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: true
+      matrix:
+        arch: [arm64, x86_64]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential bc bison flex libelf-dev libssl-dev \
+            cpio erofs-utils e2fsprogs musl-tools curl xz-utils \
+            gcc-aarch64-linux-gnu
+
+      # A kernel build is ~15 minutes; the tarball plus objects are worth
+      # caching aggressively across reruns of the same version.
+      - name: Cache kernel source
+        uses: actions/cache@v4
+        with:
+          path: /tmp/csos-work
+          key: guest-${{ matrix.arch }}-k6.12.41-alpine3.21.3-v1
+
+      - name: Build guest (${{ matrix.arch }})
+        run: |
+          mkdir -p /tmp/csos-work
+          WORK=/tmp/csos-work bash guest/build-guest.sh ${{ matrix.arch }} "$PWD/guest/dist"
+
+      - name: Upload arch artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: guest-${{ matrix.arch }}
+          path: guest/dist/${{ matrix.arch }}
+          retention-days: 3
+
+  package:
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve version
+        id: ver
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "version=${{ inputs.version }}" >> "$GITHUB_OUTPUT"
+          else
+            REF="${GITHUB_REF_NAME#guest-}"
+            echo "version=${REF#v}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: staging
+
+      - name: Assemble bundle and manifest
+        run: |
+          set -euo pipefail
+          V="${{ steps.ver.outputs.version }}"
+          OUT="csos-guest-${V}"
+          mkdir -p "$OUT"
+          mv staging/guest-arm64  "$OUT/arm64"
+          mv staging/guest-x86_64 "$OUT/x86_64"
+
+          # Manifest keys are arch-relative paths — GuestBundle.swift verifies
+          # every one of these at launch before booting anything.
+          python3 - "$OUT" <<'PY'
+          import hashlib, json, os, sys
+          root = sys.argv[1]
+          out = {}
+          for arch in ("arm64", "x86_64"):
+              for name in ("kernel", "initramfs.cpio.gz", "rootfs.erofs"):
+                  p = os.path.join(root, arch, name)
+                  h = hashlib.sha256()
+                  with open(p, "rb") as f:
+                      for chunk in iter(lambda: f.read(1 << 20), b""):
+                          h.update(chunk)
+                  out[f"{arch}/{name}"] = h.hexdigest()
+          with open(os.path.join(root, "manifest.json"), "w") as f:
+              json.dump(out, f, indent=2, sort_keys=True)
+          print(json.dumps(out, indent=2, sort_keys=True))
+          PY
+
+          tar -czf "csos-guest-${V}.tar.gz" "$OUT"
+          shasum -a 256 "csos-guest-${V}.tar.gz" | tee "csos-guest-${V}.tar.gz.sha256"
+          ls -lh "csos-guest-${V}.tar.gz"
+
+      # The kernel and busybox are GPL-2.0, so a binary release must carry a
+      # written offer for the corresponding source.
+      - name: Write source offer
+        run: |
+          V="${{ steps.ver.outputs.version }}"
+          cat > SOURCES.md <<EOF
+          # Corresponding source for cs-OS guest ${V}
+
+          This archive contains GPL-2.0 licensed binaries. Their source:
+
+          - **Linux kernel 6.12.41** — https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.12.41.tar.xz
+            Configuration: \`defconfig\` merged with the fragment in
+            \`guest/build-guest.sh\` of this repository, at tag \`guest-v${V}\`.
+          - **BusyBox 1.36.1** — https://busybox.net/downloads/busybox-1.36.1.tar.bz2
+            Configuration: \`defconfig\` with \`CONFIG_STATIC=y\`, \`CONFIG_TC=n\`.
+          - **Alpine Linux 3.21.3 minirootfs** — https://dl-cdn.alpinelinux.org/alpine/v3.21/releases/
+
+          The exact build is reproducible with:
+
+              bash guest/build-guest.sh arm64
+              bash guest/build-guest.sh x86_64
+
+          \`paned\` (guest/src/paned.c) is part of cs-OS and carries the project's
+          own licence.
+          EOF
+
+      - name: Publish guest release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          V="${{ steps.ver.outputs.version }}"
+          gh release create "guest-v${V}" \
+            "csos-guest-${V}.tar.gz" \
+            "csos-guest-${V}.tar.gz.sha256" \
+            SOURCES.md \
+            --title "cs-OS guest v${V}" \
+            --notes "Linux kernel 6.12.41 + Alpine 3.21.3 guest for cs-OS, arm64 and x86_64." \
+            || gh release upload "guest-v${V}" \
+                 "csos-guest-${V}.tar.gz" \
+                 "csos-guest-${V}.tar.gz.sha256" \
+                 SOURCES.md --clobber

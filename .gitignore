@@ -1,3 +1,8 @@
 .build/
-dist/
+third_party/
+guest/dist/
+dist/cs-OS.app/
+dist/*.tar.gz
+dist/*.sha256
+.site-backup-*/
 .DS_Store

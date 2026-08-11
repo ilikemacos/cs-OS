@@ -1,37 +1,52 @@
 # cs-OS — CLI-only build pipeline.
 #
-# No .xcodeproj, no Xcode UI, ever. SwiftPM compiles the binary; this Makefile
-# assembles the .app bundle by hand (SwiftPM cannot emit one), signs it ad-hoc
-# with the virtualization entitlement, and produces a distributable tarball.
+# No .xcodeproj, no Xcode UI, no sudo, ever.
 #
-#   make            build + bundle a runnable cs-OS.app in dist/
-#   make assets     fetch/build the Linux kernel + initfs (slow, cached)
-#   make run        build and launch
-#   make archive    tarball + sha256 for release
-#   make release    archive + GitHub release upload
+# This drives `swiftc` directly rather than SwiftPM, because SwiftPM is not
+# usable on stock Command Line Tools: CLT 26.5 ships a libPackageDescription
+# that exports no Package symbols, so even `swift package init`'s own template
+# fails to build. Driving the compiler ourselves also removes the last reason
+# anyone would need Xcode installed.
+#
+#   make deps      vendor SwiftTerm at a pinned tag
+#   make guest     fetch the prebuilt kernel + rootfs (CI-built)
+#   make           build + bundle a runnable cs-OS.app in dist/
+#   make run       build and launch
+#   make archive   tarball + SHA256 for release
 #   make clean
 
-SHELL      := /bin/bash
-VERSION    ?= 0.1.0
-BUILD      ?= $(shell date +%Y%m%d%H%M)
-CONFIG     ?= release
-ARCH       := arm64
+SHELL       := /bin/bash
+.SHELLFLAGS := -eu -o pipefail -c
 
-APP_NAME   := cs-OS
-BINARY     := csos
-BUNDLE_ID  := com.chopstickshq.csos
+# Force the Command Line Tools toolchain. Without this, /usr/bin/swiftc shims
+# to Xcode and dies on an unaccepted licence — which would need sudo to fix.
+export DEVELOPER_DIR := /Library/Developer/CommandLineTools
 
-ROOT       := $(shell pwd)
-BUILD_DIR  := $(ROOT)/.build
-ASSETS     := $(BUILD_DIR)/assets
-DIST       := $(ROOT)/dist
-APP        := $(DIST)/$(APP_NAME).app
-CONTENTS   := $(APP)/Contents
-MACOS_DIR  := $(CONTENTS)/MacOS
-RES_DIR    := $(CONTENTS)/Resources
+VERSION     ?= 0.1.0
+BUILD       ?= $(shell date +%Y%m%d%H%M)
+DEPLOY_TGT  ?= 14.0
+# Universal by default: the macOS 14 floor exists to serve Intel machines.
+ARCHS       ?= arm64 x86_64
 
-ARTIFACT   := cs-os-v$(VERSION)-$(ARCH).zip
-SWIFT_BIN  := $(BUILD_DIR)/$(CONFIG)/$(BINARY)
+APP_NAME    := cs-OS
+BINARY      := csos
+BUNDLE_ID   := com.chopstickshq.csos
+
+ROOT        := $(shell pwd)
+BUILD_DIR   := $(ROOT)/.build
+DIST        := $(ROOT)/dist
+APP         := $(DIST)/$(APP_NAME).app
+CONTENTS    := $(APP)/Contents
+VENDOR      := $(ROOT)/third_party
+GUEST_DIR   := $(ROOT)/guest/dist
+
+SWIFTTERM_REPO := https://github.com/migueldeicaza/SwiftTerm.git
+SWIFTTERM_TAG  := v1.18.0
+SWIFTTERM_SRC  := $(VENDOR)/SwiftTerm
+
+SDK         := $(shell xcrun --show-sdk-path)
+SOURCES     := $(shell find $(ROOT)/Sources/csos -name '*.swift')
+ARTIFACT    := $(APP_NAME)-$(VERSION)-macos-universal.tar.gz
 
 CYAN := \033[38;5;110m
 RESET := \033[0m
@@ -46,114 +61,107 @@ all: bundle
 
 .PHONY: preflight
 preflight:
-	@xcrun --show-sdk-version >/dev/null 2>&1 || { \
-	  printf "\033[31merror:\033[0m Xcode license not accepted.\n"; \
-	  printf "  Run: sudo xcodebuild -license accept\n"; exit 1; }
-	@[ "$$(uname -m)" = "arm64" ] || { \
-	  printf "\033[31merror:\033[0m cs-OS requires Apple silicon.\n"; exit 1; }
-	@sw_vers -productVersion | awk -F. '$$1 < 26 { \
-	  print "\033[31merror:\033[0m macOS 26 or later required (found " $$0 ")"; exit 1 }'
+	@[ -d "$(DEVELOPER_DIR)" ] || { \
+	  printf "\033[31merror:\033[0m Command Line Tools not found.\n"; \
+	  printf "  Run: xcode-select --install\n"; exit 1; }
+	@xcrun --show-sdk-path >/dev/null 2>&1 || { \
+	  printf "\033[31merror:\033[0m CLT toolchain is not usable.\n"; exit 1; }
+	@[ "$$(uname -s)" = "Darwin" ] || { \
+	  printf "\033[31merror:\033[0m macOS only.\n"; exit 1; }
 
-# ---------------------------------------------------------------- assets
+# ---------------------------------------------------------------- deps
 
-$(ASSETS)/vmlinux:
-	@bash scripts/fetch-assets.sh
+$(SWIFTTERM_SRC)/Package.swift:
+	$(call log,"vendoring SwiftTerm $(SWIFTTERM_TAG)")
+	@mkdir -p $(VENDOR)
+	@git clone -q --depth 1 -b $(SWIFTTERM_TAG) $(SWIFTTERM_REPO) $(SWIFTTERM_SRC)
 
-.PHONY: assets
-assets: $(ASSETS)/vmlinux
+.PHONY: deps
+deps: $(SWIFTTERM_SRC)/Package.swift
+
+# ---------------------------------------------------------------- guest
+
+# The kernel and rootfs are cross-built on Linux in CI (see
+# .github/workflows/guest.yml) and published as release assets. Building them
+# here would mean a Linux toolchain on macOS, i.e. Docker, i.e. a huge
+# privileged dependency — exactly what this project avoids.
+.PHONY: guest
+guest:
+	@bash scripts/fetch-guest.sh
 
 # ---------------------------------------------------------------- compile
 
+# Per-arch: SwiftTerm static lib, then the app, then lipo them together.
+#
+# A shell loop rather than $(foreach) over a `define`: foreach flattens the
+# macro onto one line, which splices the progress `printf` into the middle of
+# the swiftc invocation.
 .PHONY: build
-build: preflight
-	$(call log,"compiling csos ($(CONFIG))")
-	@swift build -c $(CONFIG) --arch $(ARCH)
+build: preflight deps
+	@for a in $(ARCHS); do \
+	  printf "$(CYAN)==>$(RESET) compiling SwiftTerm ($$a)\n"; \
+	  mkdir -p $(BUILD_DIR)/$$a; \
+	  swiftc -module-name SwiftTerm \
+	    -emit-module -emit-module-path $(BUILD_DIR)/$$a/SwiftTerm.swiftmodule \
+	    -emit-library -static -o $(BUILD_DIR)/$$a/libSwiftTerm.a \
+	    -target $$a-apple-macos$(DEPLOY_TGT) -sdk $(SDK) -O -wmo -swift-version 5 \
+	    $$(find $(SWIFTTERM_SRC)/Sources/SwiftTerm -name '*.swift' \
+	         -not -path '*/Documentation.docc/*'); \
+	  printf "$(CYAN)==>$(RESET) compiling cs-OS ($$a)\n"; \
+	  swiftc -module-name csos -o $(BUILD_DIR)/$$a/$(BINARY) \
+	    -target $$a-apple-macos$(DEPLOY_TGT) -sdk $(SDK) -O -wmo -swift-version 5 \
+	    -I $(BUILD_DIR)/$$a -L $(BUILD_DIR)/$$a -lSwiftTerm \
+	    -framework Virtualization \
+	    $(SOURCES); \
+	done
+	$(call log,"lipo -> universal")
+	@mkdir -p $(BUILD_DIR)
+	@lipo -create $(foreach a,$(ARCHS),$(BUILD_DIR)/$(a)/$(BINARY)) \
+	   -output $(BUILD_DIR)/$(BINARY)
+	@lipo -info $(BUILD_DIR)/$(BINARY)
 
 # ---------------------------------------------------------------- bundle
 
 .PHONY: bundle
-bundle: build assets
+bundle: build
 	$(call log,"assembling $(APP_NAME).app")
-	@rm -rf "$(APP)"
-	@mkdir -p "$(MACOS_DIR)" "$(RES_DIR)/linux"
-
-	@cp "$(SWIFT_BIN)" "$(MACOS_DIR)/$(BINARY)"
-	@strip -rSTx "$(MACOS_DIR)/$(BINARY)" 2>/dev/null || true
-
-	@sed -e 's/__VERSION__/$(VERSION)/' -e 's/__BUILD__/$(BUILD)/' \
-	    Resources/Info.plist > "$(CONTENTS)/Info.plist"
-
-	@cp "$(ASSETS)/vmlinux" "$(RES_DIR)/linux/vmlinux"
-	@cp $(ASSETS)/JetBrainsMonoNL-*.ttf "$(RES_DIR)/" 2>/dev/null || true
-	@[ -f Resources/AppIcon.icns ] && cp Resources/AppIcon.icns "$(RES_DIR)/" || true
-
-	@printf 'APPL????' > "$(CONTENTS)/PkgInfo"
-	@$(MAKE) --no-print-directory sign
-	$(call log,"bundled: $(APP) ($$(du -sh '$(APP)' | cut -f1))")
-
-# ---------------------------------------------------------------- sign
-#
-# Ad-hoc signature. This is sufficient because cs-OS is distributed only via
-# `curl | sh` — curl does not set com.apple.quarantine, so Gatekeeper does not
-# demand notarization. A browser-downloaded copy of the tarball WILL be blocked.
-# To notarize later: set DEVELOPER_ID and add a `notarize` step.
-
-.PHONY: sign
-sign:
-	$(call log,"signing (ad-hoc) with virtualization entitlement")
-	@plutil -lint Resources/csos.entitlements >/dev/null \
-	  || { echo "entitlements plist is malformed"; exit 1; }
+	@rm -rf $(APP)
+	@mkdir -p $(CONTENTS)/MacOS $(CONTENTS)/Resources
+	@cp $(BUILD_DIR)/$(BINARY) $(CONTENTS)/MacOS/$(BINARY)
+	@sed -e 's/__VERSION__/$(VERSION)/g' -e 's/__BUILD__/$(BUILD)/g' \
+	   Resources/Info.plist > $(CONTENTS)/Info.plist
+	@printf 'APPL????' > $(CONTENTS)/PkgInfo
+	@if [ -d $(GUEST_DIR) ]; then \
+	   cp -R $(GUEST_DIR) $(CONTENTS)/Resources/guest; \
+	 else \
+	   printf "\033[33mwarn:\033[0m no guest image — run 'make guest'. The app will build but not boot.\n"; \
+	 fi
+	$(call log,"ad-hoc signing with virtualization entitlement")
 	@codesign --force --sign - \
-	    --entitlements Resources/csos.entitlements \
-	    --timestamp=none \
-	    "$(APP)"
-	@codesign --verify --verbose=1 "$(APP)" 2>&1 | sed 's/^/    /'
-	@codesign -d --entitlements - --xml "$(APP)" 2>/dev/null \
-	  | plutil -convert xml1 -o - - 2>/dev/null \
-	  | grep -q 'com.apple.security.virtualization' \
-	  && echo "    virtualization entitlement present" \
-	  || echo "    WARNING: virtualization entitlement missing from signature"
-
-# ---------------------------------------------------------------- archive
-
-.PHONY: archive
-archive: bundle
-	$(call log,"creating $(ARTIFACT)")
-	@rm -f "$(DIST)/$(ARTIFACT)" "$(DIST)/$(ARTIFACT).sha256"
-	@# ditto, not zip/tar: it is the only archiver that reliably preserves
-	@# the code signature, symlinks and extended attributes of a .app.
-	@# `tar czf` silently corrupts the signature and the bundle fails to launch.
-	@ditto -c -k --sequesterRsrc --keepParent "$(APP)" "$(DIST)/$(ARTIFACT)"
-	@cd "$(DIST)" && shasum -a 256 "$(ARTIFACT)" | tee "$(ARTIFACT).sha256"
-	@printf '{\n  "version": "%s",\n  "artifact": "%s",\n  "sha256": "%s",\n  "min_macos": "26.0",\n  "arch": "arm64"\n}\n' \
-	    "$(VERSION)" "$(ARTIFACT)" \
-	    "$$(shasum -a 256 '$(DIST)/$(ARTIFACT)' | cut -d' ' -f1)" \
-	    > "$(DIST)/latest.json"
-	$(call log,"archive: $(DIST)/$(ARTIFACT) ($$(du -h '$(DIST)/$(ARTIFACT)' | cut -f1))")
-
-.PHONY: release
-release: archive
-	$(call log,"publishing v$(VERSION) to GitHub")
-	@gh release create "v$(VERSION)" \
-	    "$(DIST)/$(ARTIFACT)" "$(DIST)/$(ARTIFACT).sha256" "$(DIST)/latest.json" \
-	    --title "cs-OS v$(VERSION)" --notes-file CHANGELOG.md
-
-# ---------------------------------------------------------------- dev
+	  --entitlements Resources/csos-microvm.entitlements \
+	  --options runtime \
+	  --timestamp=none \
+	  $(APP)
+	@codesign --verify --verbose=1 $(APP) 2>&1 | sed 's/^/    /'
+	$(call log,"built $(APP)")
 
 .PHONY: run
 run: bundle
-	@open "$(APP)"
+	@open $(APP)
 
-.PHONY: install
-install: bundle
-	$(call log,"installing to /Applications")
-	@rm -rf "/Applications/$(APP_NAME).app"
-	@cp -R "$(APP)" /Applications/
+# ---------------------------------------------------------------- release
+
+.PHONY: archive
+archive: bundle
+	$(call log,"archiving $(ARTIFACT)")
+	@cd $(DIST) && tar -czf $(ARTIFACT) $(APP_NAME).app
+	@cd $(DIST) && shasum -a 256 $(ARTIFACT) | tee $(ARTIFACT).sha256
+	@ls -lh $(DIST)/$(ARTIFACT)
 
 .PHONY: clean
 clean:
-	@rm -rf "$(DIST)" "$(BUILD_DIR)/$(CONFIG)"
+	@rm -rf $(BUILD_DIR) $(DIST)/$(APP_NAME).app $(DIST)/*.tar.gz $(DIST)/*.sha256
 
 .PHONY: distclean
-distclean:
-	@rm -rf "$(DIST)" "$(BUILD_DIR)"
+distclean: clean
+	@rm -rf $(VENDOR) $(GUEST_DIR)

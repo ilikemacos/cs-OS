@@ -1,3 +1,11 @@
+// Compiled only when the Containerization SPM package is available.
+//
+// SwiftPM cannot run on every machine (CLT 26.5 ships a libPackageDescription
+// exporting no Package symbols), so the Makefile's local swiftc pipeline builds
+// the microVM backend alone and leaves this out. CI, which has a working
+// SwiftPM, defines CSOS_CONTAINERIZATION and gets both.
+#if CSOS_CONTAINERIZATION
+
 import Containerization
 import ContainerizationError
 import ContainerizationOS
@@ -183,3 +191,5 @@ actor ContainerBackend: LinuxBackend {
         parentPTY = nil
     }
 }
+
+#endif  // CSOS_CONTAINERIZATION

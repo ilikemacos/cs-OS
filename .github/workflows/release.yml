@@ -1,12 +1,14 @@
 name: release
 
-# Builds cs-OS on a GitHub macOS runner so no local Xcode, toolchain, or sudo
-# is ever required. Tag a version and the artifact publishes itself.
+# Builds and publishes cs-OS.app.
 #
 #   git tag v0.1.0 && git push --tags
 #
-# The runner has Xcode preinstalled with its license already accepted, which is
-# the whole reason this exists.
+# Deliberately does NOT select or use Xcode. The build forces
+# DEVELOPER_DIR=/Library/Developer/CommandLineTools and drives swiftc directly,
+# exactly as a user's machine does — so a green CI run means the documented
+# local build works too, rather than only proving that a runner with Xcode can
+# do it.
 
 on:
   push:
@@ -17,13 +19,17 @@ on:
         description: "Version to build (without the leading v)"
         required: true
         default: "0.1.0"
+      guest_tag:
+        description: "Guest release to bundle"
+        required: false
+        default: "guest-v0.1.0"
 
 permissions:
   contents: write
 
 jobs:
   build:
-    runs-on: macos-26
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
 
@@ -32,49 +38,55 @@ jobs:
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             echo "version=${{ inputs.version }}" >> "$GITHUB_OUTPUT"
+            echo "guest=${{ inputs.guest_tag }}" >> "$GITHUB_OUTPUT"
           else
             echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+            echo "guest=${CSOS_GUEST_TAG:-guest-v0.1.0}" >> "$GITHUB_OUTPUT"
           fi
 
-      # Don't hardcode a path — runner images rename Xcode between releases.
-      # Pick the newest installed and fail loudly if it is too old for Swift 6.2.
-      - name: Select newest Xcode
+      - name: Verify the CLT toolchain (no Xcode)
         run: |
-          ls -d /Applications/Xcode*.app 2>/dev/null || true
-          LATEST="$(ls -d /Applications/Xcode*.app 2>/dev/null | sort -V | tail -1)"
-          if [ -n "$LATEST" ]; then
-            echo "selecting $LATEST"
-            sudo xcode-select -s "$LATEST"
-          else
-            echo "no Xcode*.app found; using preselected toolchain"
-          fi
-          xcodebuild -version
+          export DEVELOPER_DIR=/Library/Developer/CommandLineTools
+          echo "DEVELOPER_DIR=$DEVELOPER_DIR"
           swift --version
+          xcrun --show-sdk-version
 
-      # The kernel is a stable third-party artifact, so cache it aggressively —
-      # it is a ~277 MB download for a single file.
-      - name: Cache Linux assets
-        id: assets-cache
+      - name: Cache vendored SwiftTerm
         uses: actions/cache@v4
         with:
-          path: .build/assets
-          key: csos-assets-kata3.17.0-cz0.33.3-v4
+          path: third_party
+          key: swiftterm-v1.18.0
 
-      # Just a kernel download — the guest init is pulled from Apple's public
-      # OCI image at runtime, so nothing here needs virtualization.
-      - name: Build Linux assets
-        if: steps.assets-cache.outputs.cache-hit != 'true'
-        run: bash scripts/fetch-assets.sh
-
-      - name: Cache SwiftPM dependencies
+      - name: Cache guest image
         uses: actions/cache@v4
         with:
-          path: .build/checkouts
-          key: spm-${{ hashFiles('Package.resolved', 'Package.swift') }}
-          restore-keys: spm-
+          path: guest/dist
+          key: guest-${{ steps.ver.outputs.guest }}
+
+      - name: Fetch guest image
+        env:
+          CSOS_GUEST_TAG: ${{ steps.ver.outputs.guest }}
+        run: make guest
 
       - name: Build and bundle
         run: make bundle VERSION=${{ steps.ver.outputs.version }}
+
+      - name: Verify signature and entitlements
+        run: |
+          set -euo pipefail
+          codesign --verify --deep --strict --verbose=2 dist/cs-OS.app
+          # The virtualization entitlement is load-bearing: without it the app
+          # builds and launches but can never start a VM.
+          codesign -d --entitlements - dist/cs-OS.app 2>/dev/null \
+            | tr -d '\0' | grep -q "com.apple.security.virtualization" \
+            || { echo "::error::virtualization entitlement missing"; exit 1; }
+          # A restricted entitlement on an ad-hoc binary can block launch.
+          if codesign -d --entitlements - dist/cs-OS.app 2>/dev/null \
+               | tr -d '\0' | grep -q "com.apple.vm.networking"; then
+            echo "::error::com.apple.vm.networking must not be in ad-hoc builds"
+            exit 1
+          fi
+          lipo -info dist/cs-OS.app/Contents/MacOS/csos
 
       - name: Archive
         run: make archive VERSION=${{ steps.ver.outputs.version }}
@@ -83,15 +95,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          set -euo pipefail
           V="${{ steps.ver.outputs.version }}"
-          gh release create "v${V}" \
-            "dist/cs-os-v${V}-arm64.zip" \
-            "dist/cs-os-v${V}-arm64.zip.sha256" \
-            "dist/latest.json" \
+          A="dist/cs-OS-${V}-macos-universal.tar.gz"
+          gh release create "v${V}" "$A" "${A}.sha256" \
             --title "cs-OS v${V}" \
             --notes-file CHANGELOG.md \
-            --clobber || \
-          gh release upload "v${V}" \
-            "dist/cs-os-v${V}-arm64.zip" \
-            "dist/cs-os-v${V}-arm64.zip.sha256" \
-            "dist/latest.json" --clobber
+            || gh release upload "v${V}" "$A" "${A}.sha256" --clobber

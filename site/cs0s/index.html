@@ -1,0 +1,781 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<script>
+(function(){try{var t=localStorage.getItem('chq.theme');if(t==='light'||t==='dark')document.documentElement.setAttribute('data-theme',t);else if(window.matchMedia&&matchMedia('(prefers-color-scheme: light)').matches)document.documentElement.setAttribute('data-theme','light');}catch(e){}})();
+</script>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>cs-OS — real Linux on macOS · Chopsticks HQ</title>
+<meta name="description" content="cs-OS runs real Linux on macOS in a lightweight VM — actual kernel, actual package manager, sub-second boot. Native Swift, no Electron, no sudo.">
+<meta name="keywords" content="cs-OS, Linux on macOS, macOS terminal, Containerization, Apple silicon, Alpine, microVM, Chopsticks HQ">
+<link rel="canonical" href="https://chopstickshq.com/cs0s/">
+<meta property="og:title" content="cs-OS — real Linux on macOS">
+<meta property="og:description" content="A native macOS terminal running real Linux in a lightweight VM. Sub-second boot, no Electron, no sudo.">
+<meta property="og:url" content="https://chopstickshq.com/cs0s/">
+<meta property="og:type" content="website">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="cs-OS — real Linux on macOS">
+<meta name="twitter:description" content="Real Linux in a lightweight VM, in a native macOS terminal.">
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon.png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  
+  :root, html[data-theme="dark"] {
+    --bg: #0a0a0c; --bg2: #0e0e12; --card: #121216; --card2: #18181e;
+    --border: #26262e; --text: #f2f2f5; --muted: #8b8b9a; --soft: #e8e8ed;
+    --nav-bg: rgba(10,10,12,0.72); --nav-border: rgba(255,255,255,0.08);
+  }
+  html[data-theme="light"] {
+    --bg: #f4f4f6; --bg2: #ebebef; --card: #ffffff; --card2: #f0f0f4;
+    --border: #d8d8e0; --text: #121218; --muted: #5c5c6a; --soft: #14141a;
+    --nav-bg: rgba(244,244,246,0.85); --nav-border: rgba(0,0,0,0.08);
+  }
+  .theme-toggle {
+    display: inline-flex; align-items: center; height: 2.15rem; padding: 0 0.75rem;
+    border-radius: 999px; border: 1px solid var(--border); background: transparent;
+    color: var(--text); cursor: pointer; font-size: 0.75rem; font-weight: 600; font-family: inherit;
+  }
+  .theme-toggle:hover { background: rgba(127,127,127,0.12); }
+  .gallery {
+    display: grid; gap: 1rem; margin-top: 1.25rem;
+  }
+  @media (min-width: 720px) { .gallery { grid-template-columns: 1fr 1fr; } }
+  .gallery-card {
+    border: 1px solid var(--border); border-radius: 14px; overflow: hidden;
+    background: var(--card); box-shadow: var(--shadow, 0 4px 24px -4px rgba(0,0,0,.45));
+  }
+  .gallery-card .cap {
+    padding: 0.65rem 0.9rem; font-size: 0.75rem; color: var(--muted);
+    font-family: var(--mono); border-top: 1px solid var(--border);
+  }
+
+  :root {
+    /* 101mogged-inspired tokens (same family as rNitro) */
+    --bg:       #0a0a0c;
+    --bg2:      #0e0e12;
+    --card:     #121216;
+    --card2:    #18181e;
+    --border:   #26262e;
+    --text:     #f2f2f5;
+    --muted:    #8b8b9a;
+    --soft:     #e8e8ed;
+    --mono:     'JetBrains Mono', ui-monospace, Menlo, monospace;
+    --sans:     'Inter', system-ui, -apple-system, sans-serif;
+    --display:  'Space Grotesk', 'Inter', system-ui, sans-serif;
+    --radius:   .75rem;
+    --glow:     0 0 60px -15px rgba(230,230,230,.18);
+    --shadow:   0 4px 24px -4px rgba(0,0,0,.45);
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; }
+  body {
+    min-height: 100vh;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    font-size: 15px;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+    overflow-x: hidden;
+  }
+  h1, h2, h3, .nav-logo { font-family: var(--display); letter-spacing: -0.03em; font-weight: 600; }
+  a { color: inherit; text-decoration: none; }
+  code, pre, .mono { font-family: var(--mono); }
+
+  /* Soft radial glow + grid */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+    background:
+      radial-gradient(ellipse 90% 50% at 50% -10%, rgba(255,255,255,.06), transparent 55%),
+      linear-gradient(rgba(255,255,255,0.02) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255,255,255,0.02) 1px, transparent 1px);
+    background-size: auto, 64px 64px, 64px 64px;
+    mask-image: radial-gradient(ellipse 80% 70% at 50% 20%, #000 15%, transparent 80%);
+  }
+  .app { position: relative; z-index: 1; }
+
+  /* Fixed glass nav */
+  nav {
+    position: fixed;
+    top: 0; left: 0; right: 0;
+    z-index: 100;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 0 20px;
+    min-height: 4rem;
+    background: var(--nav-bg);
+    backdrop-filter: blur(18px);
+    -webkit-backdrop-filter: blur(18px);
+    border-bottom: 1px solid var(--nav-border);
+  }
+  .nav-logo {
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: var(--text);
+    white-space: nowrap;
+  }
+  .nav-logo span { color: var(--muted); font-weight: 400; }
+  .nav-mid {
+    display: none;
+    gap: 0.35rem;
+    align-items: center;
+  }
+  @media (min-width: 720px) { .nav-mid { display: flex; } }
+  .nav-link {
+    font-size: 0.8125rem;
+    font-weight: 500;
+    color: var(--muted);
+    padding: 0.45rem 0.95rem;
+    border: 1px solid transparent;
+    border-radius: 999px;
+    transition: .15s color, .15s background, .15s border-color;
+  }
+  .nav-link:hover {
+    color: var(--text);
+    border-color: rgba(255,255,255,0.12);
+    background: rgba(255,255,255,0.05);
+  }
+  .nav-right { display: flex; align-items: center; gap: 8px; }
+
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.4rem;
+    height: 2.5rem;
+    padding: 0 1.15rem;
+    border-radius: 999px;
+    font-size: 0.875rem;
+    font-weight: 500;
+    font-family: var(--sans);
+    border: 1px solid transparent;
+    cursor: pointer;
+    transition: .15s background, .15s border-color, .12s transform, .15s opacity;
+  }
+  .btn:hover { transform: translateY(-1px); }
+  .btn-sm { height: 2.25rem; padding: 0 0.95rem; font-size: 0.8125rem; }
+  .btn-primary {
+    background: var(--soft);
+    color: var(--bg);
+  }
+  .btn-primary:hover { opacity: 0.92; }
+  .btn-outline {
+    border-color: rgba(255,255,255,0.12);
+    background: transparent;
+    color: var(--text);
+  }
+  .btn-outline:hover {
+    background: rgba(255,255,255,0.05);
+    border-color: rgba(255,255,255,0.22);
+  }
+
+  .wrap {
+    width: min(72rem, calc(100% - 2rem));
+    margin-inline: auto;
+  }
+
+  /* Hero */
+  .hero {
+    padding: 7.5rem 0 3.5rem;
+  }
+  @media (min-width: 768px) {
+    .hero { padding: 8.5rem 0 5rem; }
+  }
+  .hero-grid {
+    display: grid;
+    gap: 2.75rem;
+    align-items: center;
+  }
+  @media (min-width: 960px) {
+    .hero-grid { grid-template-columns: 1.25fr 0.95fr; gap: 3.5rem; }
+  }
+
+  .pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.55rem;
+    margin-bottom: 1.25rem;
+    padding: 0.4rem 0.85rem;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: rgba(18,18,22,0.9);
+    font-family: var(--mono);
+    font-size: 0.68rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  .pill-dot {
+    width: 0.4rem; height: 0.4rem;
+    border-radius: 999px;
+    background: #c8c8d0;
+    box-shadow: 0 0 0 4px rgba(200,200,208,0.15);
+  }
+
+  .hero h1 {
+    font-size: clamp(2.6rem, 6vw, 3.75rem);
+    font-weight: 700;
+    letter-spacing: -0.045em;
+    line-height: 1.02;
+    margin-bottom: 1.15rem;
+  }
+  .hero h1 .dim {
+    color: var(--muted);
+    font-weight: 500;
+  }
+  .hero-lead {
+    font-size: 1.05rem;
+    line-height: 1.7;
+    color: var(--muted);
+    max-width: 34rem;
+    margin-bottom: 1.75rem;
+  }
+  .hero-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    margin-bottom: 1.35rem;
+  }
+  .hero-meta {
+    font-family: var(--mono);
+    font-size: 0.72rem;
+    color: var(--muted);
+    letter-spacing: 0.02em;
+  }
+  .hero-meta code {
+    color: var(--text);
+    background: rgba(255,255,255,0.05);
+    padding: 0.15rem 0.4rem;
+    border-radius: 0.35rem;
+    border: 1px solid var(--border);
+  }
+
+  /* Product preview card (menubar mock) */
+  .preview {
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: linear-gradient(180deg, rgba(24,24,30,0.98), rgba(14,14,18,0.98));
+    box-shadow: var(--shadow), var(--glow);
+    overflow: hidden;
+  }
+  .preview-menubar {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 0.65rem;
+    padding: 0.55rem 0.9rem;
+    background: rgba(0,0,0,0.35);
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+    font-family: var(--mono);
+    font-size: 0.72rem;
+    color: rgba(255,255,255,0.75);
+  }
+  .mb-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.28rem;
+    padding: 0.15rem 0.35rem;
+    border-radius: 0.3rem;
+  }
+  .mb-item.active {
+    background: rgba(255,255,255,0.1);
+    color: #fff;
+  }
+  .mb-batt {
+    width: 1.15rem; height: 0.55rem;
+    border: 1.5px solid currentColor;
+    border-radius: 2px;
+    position: relative;
+    opacity: 0.9;
+  }
+  .mb-batt::after {
+    content: '';
+    position: absolute;
+    right: -3px; top: 50%;
+    transform: translateY(-50%);
+    width: 2px; height: 3px;
+    background: currentColor;
+    border-radius: 0 1px 1px 0;
+  }
+  .mb-batt i {
+    display: block;
+    height: 100%;
+    width: 78%;
+    background: currentColor;
+    border-radius: 0.5px;
+  }
+  .preview-body { padding: 1.15rem 1.15rem 1.25rem; }
+  .preview-head {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-bottom: 1rem;
+    padding-bottom: 0.9rem;
+    border-bottom: 1px solid rgba(255,255,255,0.07);
+  }
+  .preview-pct {
+    font-family: var(--display);
+    font-size: 2.35rem;
+    font-weight: 600;
+    letter-spacing: -0.04em;
+    line-height: 1;
+  }
+  .preview-sub {
+    font-size: 0.8rem;
+    color: var(--muted);
+    margin-top: 0.35rem;
+  }
+  .preview-badge {
+    font-family: var(--mono);
+    font-size: 0.65rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--muted);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 0.3rem 0.6rem;
+  }
+  .preview-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 0.48rem 0;
+    font-size: 0.875rem;
+  }
+  .preview-row span:first-child { color: var(--muted); }
+  .preview-row span:last-child { font-weight: 500; }
+
+  /* Sections */
+  .sec { padding: 3rem 0; }
+  .sec-tight { padding-top: 1rem; }
+  .kicker {
+    font-family: var(--mono);
+    font-size: 0.68rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 0.65rem;
+  }
+  .sec h2 {
+    font-size: clamp(1.55rem, 3vw, 2.05rem);
+    margin-bottom: 0.75rem;
+  }
+  .sec-lead {
+    color: var(--muted);
+    max-width: 40rem;
+    margin-bottom: 1.75rem;
+    line-height: 1.65;
+  }
+
+  .grid {
+    display: grid;
+    gap: 1rem;
+    grid-template-columns: 1fr;
+  }
+  @media (min-width: 700px) {
+    .grid-2 { grid-template-columns: repeat(2, 1fr); }
+    .grid-3 { grid-template-columns: repeat(3, 1fr); }
+  }
+  .card {
+    padding: 1.3rem 1.35rem;
+    border-radius: var(--radius);
+    border: 1px solid var(--border);
+    background: rgba(18,18,22,0.92);
+    box-shadow: var(--shadow);
+    transition: .15s border-color, .15s transform;
+  }
+  .card:hover {
+    border-color: rgba(255,255,255,0.16);
+    transform: translateY(-1px);
+  }
+  .card h3 {
+    font-size: 1.02rem;
+    margin-bottom: 0.45rem;
+  }
+  .card p {
+    font-size: 0.9rem;
+    color: var(--muted);
+    line-height: 1.55;
+  }
+  .card-ico {
+    width: 2rem; height: 2rem;
+    border-radius: 0.55rem;
+    border: 1px solid var(--border);
+    background: rgba(255,255,255,0.03);
+    display: grid;
+    place-items: center;
+    margin-bottom: 0.85rem;
+    font-size: 0.95rem;
+    color: var(--soft);
+  }
+
+  /* Install */
+  .dl { display: grid; gap: 1rem; }
+  @media (min-width: 800px) { .dl { grid-template-columns: 1.15fr 0.85fr; } }
+  .dl-card {
+    padding: 1.4rem 1.45rem;
+    border-radius: var(--radius);
+    border: 1px solid var(--border);
+    background: rgba(18,18,22,0.92);
+    box-shadow: var(--shadow);
+  }
+  .dl-card h3 { font-size: 1.05rem; margin-bottom: 0.4rem; }
+  .dl-card p {
+    font-size: 0.875rem;
+    color: var(--muted);
+    margin-bottom: 1rem;
+    line-height: 1.55;
+  }
+  .curl {
+    font-family: var(--mono);
+    font-size: 0.74rem;
+    background: rgba(0,0,0,0.35);
+    border: 1px solid var(--border);
+    border-radius: 0.65rem;
+    padding: 0.9rem 1rem;
+    overflow-x: auto;
+    color: var(--text);
+    margin-bottom: 0.9rem;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-break: break-all;
+    cursor: pointer;
+    -webkit-user-select: text;
+    user-select: text;
+  }
+  .curl:hover { border-color: rgba(255,255,255,0.22); }
+  .dl-actions { display: flex; flex-wrap: wrap; gap: 0.6rem; align-items: center; }
+  .note {
+    font-size: 0.8rem;
+    color: var(--muted);
+    margin-top: 0.85rem;
+    line-height: 1.5;
+  }
+  .note a { text-decoration: underline; text-underline-offset: 2px; }
+  .note code { color: var(--text); font-size: 0.75rem; }
+
+  /* Steps strip */
+  .steps {
+    display: grid;
+    gap: 0.75rem;
+    grid-template-columns: 1fr;
+  }
+  @media (min-width: 700px) { .steps { grid-template-columns: repeat(3, 1fr); } }
+  .step {
+    padding: 1.1rem 1.15rem;
+    border-radius: var(--radius);
+    border: 1px dashed rgba(255,255,255,0.1);
+    background: rgba(255,255,255,0.02);
+  }
+  .step n {
+    display: block;
+    font-family: var(--mono);
+    font-size: 0.68rem;
+    color: var(--muted);
+    letter-spacing: 0.08em;
+    margin-bottom: 0.4rem;
+  }
+  .step strong {
+    display: block;
+    font-family: var(--display);
+    font-size: 0.95rem;
+    margin-bottom: 0.3rem;
+  }
+  .step p { font-size: 0.85rem; color: var(--muted); }
+
+  /* Footer */
+  .foot {
+    border-top: 1px solid rgba(255,255,255,0.08);
+    padding: 2rem 0 3rem;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1rem 1.5rem;
+    justify-content: space-between;
+    font-size: 0.85rem;
+    color: var(--muted);
+  }
+  .foot a:hover { color: var(--text); }
+  .foot-links { display: flex; flex-wrap: wrap; gap: 1rem; }
+  .disclaimer {
+    margin: 0 0 1.25rem; padding: 0.9rem 1.1rem;
+    border: 1px solid var(--border); border-radius: var(--radius);
+    background: rgba(18,18,22,0.75); color: var(--muted); font-size: 0.8rem; line-height: 1.55;
+  }
+  .disclaimer strong { color: var(--text); font-weight: 600; }
+  .disclaimer a { color: var(--text); text-decoration: underline; text-underline-offset: 2px; }
+
+  .toast {
+    position: fixed;
+    bottom: 1.5rem;
+    left: 50%;
+    transform: translateX(-50%) translateY(80px);
+    background: var(--card2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    font-family: var(--mono);
+    font-size: 0.75rem;
+    padding: 0.65rem 1rem;
+    border-radius: 999px;
+    opacity: 0;
+    transition: .25s;
+    z-index: 50;
+    pointer-events: none;
+    box-shadow: var(--shadow);
+  }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+  .compare {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.9rem;
+    margin-top: 1rem;
+  }
+  .compare th, .compare td {
+    padding: 0.7rem 0.85rem;
+    text-align: left;
+    border-bottom: 1px solid var(--border);
+    vertical-align: top;
+  }
+  .compare th {
+    color: var(--muted);
+    font-weight: 600;
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+  .compare td:first-child { color: var(--muted); width: 36%; }
+  .compare .yes { color: #9effc0; }
+  .compare .no { color: var(--muted); }
+  .compare .name { color: var(--text); font-weight: 600; }
+</style>
+</head>
+<body>
+  <div class="app">
+    <nav>
+      <a class="nav-logo" href="/">Chopsticks HQ <span>· cs-OS</span></a>
+      <div class="nav-mid">
+        <a class="nav-link" href="/">HQ</a>
+        <a class="nav-link" href="/rnitro/">rNitro</a>
+        <a class="nav-link" href="/fathom/">Fathom</a>
+        <a class="nav-link" href="/chopsticks-ai/">chopsticksAI</a>
+        <a class="nav-link" href="#features">Features</a>
+        <a class="nav-link" href="#install">Install</a>
+        <a class="nav-link" href="#specs">Specs</a>
+        <a class="nav-link" href="#changelog">Changelog</a>
+      </div>
+      <div class="nav-right">
+        <a class="btn btn-primary btn-sm" href="#install">Install</a>
+      </div>
+    </nav>
+
+    <header class="hero">
+      <div class="wrap">
+        <div class="hero-grid">
+          <div>
+            <div class="kicker">macOS 14+ · Apple silicon &amp; Intel</div>
+            <h1>cs-OS <span class="dim">— real Linux,<br>natively</span></h1>
+            <p class="hero-lead">
+              A native macOS terminal that runs actual Linux — real kernel, real
+              <span class="mono">/proc</span>, real package manager — in a lightweight VM
+              that boots in about a second. Not an emulator, not a shell wrapper,
+              not Electron.
+            </p>
+
+            <pre class="curl" id="install-cmd" title="Click to copy">curl -fsSL https://chopstickshq.com/cs0s/install.sh | sh</pre>
+
+            <p class="hero-meta">
+              <span class="pill"><span class="pill-dot"></span>v0.1.0 · not yet released</span>
+              &nbsp;·&nbsp; ~140 MB installed &nbsp;·&nbsp; no sudo &nbsp;·&nbsp; no Xcode
+            </p>
+
+            <div class="hero-actions">
+              <a class="btn btn-primary" href="#install">How to install</a>
+              <a class="btn btn-outline" href="#specs">Requirements</a>
+            </div>
+          </div>
+
+          <div>
+            <div class="preview">
+              <div class="preview-head">
+                <span class="preview-badge">alpine</span>
+                <span class="preview-sub">cs-OS — session 1</span>
+              </div>
+              <div class="preview-body">
+<pre class="mono" style="margin:0;font-size:.72rem;line-height:1.8;white-space:pre;overflow-x:auto">~ $ uname -sr
+Linux 6.14.9
+~ $ head -1 /etc/os-release
+NAME="Alpine Linux"
+~ $ apk add ripgrep
+(1/1) Installing ripgrep (14.1.1-r0)
+OK: 12 MiB in 16 packages
+~ $ nproc &amp;&amp; free -m | head -2
+2
+       total  used  free
+Mem:    1024   118   906
+~ $ █</pre>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <section class="sec" id="features">
+      <div class="wrap">
+        <div class="kicker">What it is</div>
+        <h2>Real Linux, not an approximation</h2>
+        <p class="sec-lead">
+          macOS cannot load Linux binaries — there is no <span class="mono">binfmt_misc</span>,
+          no WSL1-style translation layer. So cs-OS does the honest thing and runs a real
+          kernel in a real VM, using Apple's Containerization framework.
+        </p>
+        <div class="grid grid-2">
+          <article class="card">
+            <div class="card-ico">▮</div>
+            <h3>One microVM per tab</h3>
+            <p>Every session is an OCI image in its own lightweight VM. Namespaces, cgroups
+            and <span class="mono">apk</span>/<span class="mono">apt</span> all work, because
+            none of it is being faked.</p>
+          </article>
+          <article class="card">
+            <div class="card-ico">⚡</div>
+            <h3>Sub-second boot</h3>
+            <p>An optimized kernel and a minimal init get you to a prompt faster than most
+            terminal emulators open a tab.</p>
+          </article>
+          <article class="card">
+            <div class="card-ico">⌘</div>
+            <h3>Bring your own distro</h3>
+            <p>Alpine by default. Debian, Ubuntu and Fedora are one click away — anything with
+            an OCI image works, pulled on demand.</p>
+          </article>
+          <article class="card">
+            <div class="card-ico">◆</div>
+            <h3>Glass where it belongs</h3>
+            <p>Liquid Glass chrome and tabs. The text grid itself stays opaque and cheap to
+            composite, so output never stutters behind a blur.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="sec sec-tight" id="install">
+      <div class="wrap">
+        <div class="kicker">Install</div>
+        <h2>One line, no password</h2>
+        <pre class="curl" id="install-cmd-2" title="Click to copy">curl -fsSL https://chopstickshq.com/cs0s/install.sh | sh</pre>
+        <div class="steps">
+          <div class="step">
+            <div class="name">1 · Checks your Mac</div>
+            <p>macOS 14 or later, Apple silicon or Intel. Checks your OS, CPU and RAM, and stops with a clear reason if anything is short.</p>
+          </div>
+          <div class="step">
+            <div class="name">2 · Verifies the download</div>
+            <p>SHA-256 checked against the release manifest before anything is unpacked.</p>
+          </div>
+          <div class="step">
+            <div class="name">3 · Installs the app</div>
+            <p>Into <span class="mono">/Applications</span>, or <span class="mono">~/Applications</span>
+            if that isn't writable. It never asks for a password.</p>
+          </div>
+        </div>
+        <p class="note">
+          <strong>No sudo. No Xcode. No toolchain.</strong> The script only ever downloads a
+          prebuilt, checksum-verified app. Uninstall is
+          <span class="mono">rm -rf /Applications/cs-OS.app</span>.
+        </p>
+      </div>
+    </section>
+
+    <section class="sec" id="specs">
+      <div class="wrap">
+        <div class="kicker">Specs</div>
+        <h2>Requirements &amp; size</h2>
+        <div class="grid grid-2">
+          <article class="card">
+            <h3>Requirements</h3>
+            <table class="compare">
+              <tbody>
+                <tr><td>macOS</td><td class="mono">14.0 or later</td></tr>
+                <tr><td>Chip</td><td class="mono">Apple silicon or Intel</td></tr>
+                <tr><td>CPU</td><td class="mono">M1 / Core i5 2019+</td></tr>
+                <tr><td>Disk</td><td class="mono">~120 MB</td></tr>
+                <tr><td>Memory</td><td class="mono">4 GB minimum, 8 GB recommended</td></tr>
+                <tr><td>Network</td><td class="mono">first launch only</td></tr>
+              </tbody>
+            </table>
+          </article>
+          <article class="card">
+            <h3>Where the megabytes go</h3>
+            <table class="compare">
+              <tbody>
+                <tr><td>Linux kernel</td><td class="mono">~12 MB</td></tr>
+                <tr><td>initramfs + agent</td><td class="mono">~3 MB</td></tr>
+                <tr><td>csos binary</td><td class="mono">~6 MB</td></tr>
+                <tr><td>Icon (system font)</td><td class="mono">~1 MB</td></tr>
+                <tr><td>Alpine rootfs</td><td class="mono">~30 MB</td></tr>
+              </tbody>
+            </table>
+          </article>
+        </div>
+        <p class="note">
+          No root filesystem is bundled — images are pulled on demand, so the download stays
+          the same size no matter which distro you end up living in.
+        </p>
+      </div>
+    </section>
+
+    <section class="sec sec-tight" id="changelog">
+      <div class="wrap">
+        <div class="kicker">Changelog</div>
+        <h2>Releases</h2>
+        <div class="steps">
+          <div class="step">
+            <div class="name">v0.1.0 — unreleased</div>
+            <p>Containerization-backed sessions, one microVM per tab. Liquid Glass tab strip and
+            window chrome. SwiftTerm rendering with xterm-256color and full scrollback. Alpine
+            by default, with Debian, Ubuntu and Fedora presets. One-line installer with
+            SHA-256 verification.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <footer class="wrap foot">
+      <div>© ChopsticksHQ 2026</div>
+      <div class="foot-links">
+        <a href="/">HQ</a>
+        <a href="/about/">About</a>
+        <a href="/disclaimer/">Disclaimer</a>
+        <a href="/rnitro/">rNitro</a>
+        <a href="/fathom/">Fathom</a>
+        <a href="/cs0s/install.sh">install script</a>
+      </div>
+    </footer>
+  </div>
+
+  <div class="toast" id="toast">Copied</div>
+  <script src="/js/clipboard.js"></script>
+  <script>
+    function toast(msg) {
+      const t = document.getElementById('toast');
+      if (!t) return;
+      t.textContent = msg;
+      t.classList.add('show');
+      setTimeout(() => t.classList.remove('show'), 2200);
+    }
+  </script>
+</body>
+</html>

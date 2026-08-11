@@ -13,7 +13,9 @@ final class Session: Identifiable {
     var scrollPosition: Double = 0
     var state: State = .idle
 
-    private(set) var backend: ContainerBackend?
+    /// Existential, not concrete: which backend this is depends on the OS.
+    /// See BackendFactory.
+    private(set) var backend: (any LinuxBackend)?
 
     enum State: Equatable {
         case idle, booting, running, failed(String), exited
@@ -32,7 +34,7 @@ final class Session: Identifiable {
         guard backend == nil else { return }
         state = .booting
         do {
-            let backend = try ContainerBackend(image: image)
+            let backend = BackendFactory.make(image: image)
             self.backend = backend
             try await backend.start()
             state = .running

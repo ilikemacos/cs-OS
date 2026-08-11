@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- Entitlements for ad-hoc signed (unnotarised) builds — the ones the
+         install script ships.
+
+         ONLY com.apple.security.virtualization appears here. That entitlement
+         is honoured for ad-hoc signatures, which is what lets cs-OS run a real
+         VM with no Developer ID and no sudo.
+
+         com.apple.vm.networking is deliberately ABSENT: it is a restricted
+         entitlement that Apple grants by application only, and an ad-hoc binary
+         claiming it is not merely ignored — it can fail to launch. The microVM
+         backend therefore uses VZNATNetworkDeviceAttachment, which needs no
+         such grant. See Resources/csos.entitlements for the Developer ID build
+         that can legitimately claim vmnet. -->
+    <key>com.apple.security.virtualization</key>
+    <true/>
+</dict>
+</plist>

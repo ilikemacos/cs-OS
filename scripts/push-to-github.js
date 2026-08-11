@@ -22,7 +22,17 @@ if (!REPO) {
 }
 
 const ROOT = path.resolve(__dirname, "..");
-const SKIP_DIRS = new Set([".git", ".build", "node_modules", "dist/.tmp"]);
+// Build outputs, vendored sources and local backups must never reach the
+// repo: third_party is a full SwiftTerm clone (~6MB) and dist/cs-OS.app is a
+// compiled universal binary (~5MB). Both are reproducible from source.
+const SKIP_DIRS = new Set([
+  ".git", ".build", "node_modules", "dist/.tmp",
+  "third_party",        // vendored SwiftTerm clone — `make deps` recreates it
+  "dist/cs-OS.app",     // build output
+  "guest/dist",         // fetched guest image — `make guest` recreates it
+]);
+// Anything matching these prefixes is skipped wherever it appears.
+const SKIP_PREFIXES = [".site-backup-"];
 const SKIP_FILES = new Set([".DS_Store"]);
 
 function gh(args, input) {
@@ -48,8 +58,11 @@ const files = [];
     if (SKIP_FILES.has(entry.name)) continue;
     const abs = path.join(dir, entry.name);
     const r = rel ? rel + "/" + entry.name : entry.name;
+    if (SKIP_PREFIXES.some((p) => entry.name.startsWith(p))) continue;
     if (entry.isDirectory()) {
       if (SKIP_DIRS.has(entry.name) || SKIP_DIRS.has(r)) continue;
+      // Never push a built app bundle, wherever it turns up.
+      if (entry.name.endsWith(".app")) continue;
       walk(abs, r);
     } else {
       files.push({ path: r, abs, mode: (fs.statSync(abs).mode & 0o111) ? "100755" : "100644" });

@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 /// The Liquid Glass tab strip + toolbar.
@@ -5,6 +6,11 @@ import SwiftUI
 /// All the translucency in cs-OS lives here. Everything in this file sits over
 /// a static backdrop, so the compositor can cache the blur; the terminal grid
 /// below is opaque and repaints independently.
+///
+/// Every Liquid Glass API used here (`GlassEffectContainer`, `.glassEffect`,
+/// `.glassEffectID`, `.buttonStyle(.glass)`) is macOS 26+. The deployment floor
+/// is macOS 14, so each one is gated with a material fallback rather than
+/// raising the floor and cutting off 4GB-class Intel machines.
 struct GlassChrome: View {
     @Bindable var store: SessionStore
     @Namespace private var glassNamespace
@@ -17,17 +23,26 @@ struct GlassChrome: View {
     }
 
     var body: some View {
-        GlassEffectContainer(spacing: 12) {
-            HStack(spacing: 10) {
-                tabStrip
-                Spacer(minLength: 8)
-                newTabButton
-            }
-            .padding(.horizontal, 12)
-            .frame(height: Theme.chromeHeight)
+        bar
+            .offset(y: parallax * 0.5)
+            .animation(.smooth(duration: 0.28), value: parallax)
+    }
+
+    @ViewBuilder
+    private var bar: some View {
+        let content = HStack(spacing: 10) {
+            tabStrip
+            Spacer(minLength: 8)
+            newTabButton
         }
-        .offset(y: parallax * 0.5)
-        .animation(.smooth(duration: 0.28), value: parallax)
+        .padding(.horizontal, 12)
+        .frame(height: Theme.chromeHeight)
+
+        if #available(macOS 26.0, *) {
+            GlassEffectContainer(spacing: 12) { content }
+        } else {
+            content
+        }
     }
 
     private var tabStrip: some View {
@@ -48,23 +63,53 @@ struct GlassChrome: View {
         .scrollClipDisabled()
     }
 
+    /// With Containerization the user picks an OCI image, so this is a menu.
+    /// The microVM backend has one bundled userland, so it degrades to a plain
+    /// button rather than offering choices it cannot honour.
+    @ViewBuilder
     private var newTabButton: some View {
-        Menu {
-            ForEach(SessionStore.presets, id: \.self) { image in
-                Button(image.split(separator: "/").last.map(String.init) ?? image) {
-                    store.newSession(image: image)
+        if BackendFactory.supportsImageSelection {
+            Menu {
+                ForEach(SessionStore.presets, id: \.self) { image in
+                    Button(image.split(separator: "/").last.map(String.init) ?? image) {
+                        store.newSession(image: image)
+                    }
                 }
+            } label: {
+                plusLabel
+            } primaryAction: {
+                store.newSession()
             }
-        } label: {
-            Image(systemName: "plus")
-                .font(.system(size: 12, weight: .semibold))
-                .frame(width: 26, height: 26)
-        } primaryAction: {
-            store.newSession()
+            .menuStyle(.button)
+            .modifier(GlassButtonStyle())
+            .help("New Linux session")
+        } else {
+            Button { store.newSession() } label: { plusLabel }
+                .modifier(GlassButtonStyle())
+                .help("New Linux session")
         }
-        .menuStyle(.button)
-        .buttonStyle(.glass)
-        .help("New Linux session")
+    }
+
+    private var plusLabel: some View {
+        Image(systemName: "plus")
+            .font(.system(size: 12, weight: .semibold))
+            .frame(width: 26, height: 26)
+    }
+}
+
+/// `.buttonStyle(.glass)` is macOS 26 only; below it, a bordered button over a
+/// thin material reads closest.
+private struct GlassButtonStyle: ViewModifier {
+    func body(content: Content) -> some View {
+        if #available(macOS 26.0, *) {
+            content.buttonStyle(.glass)
+        } else {
+            content
+                .buttonStyle(.plain)
+                .background(
+                    .ultraThinMaterial,
+                    in: .rect(cornerRadius: Theme.cornerRadius, style: .continuous))
+        }
     }
 }
 
@@ -95,17 +140,43 @@ private struct TabChip: View {
         .padding(.horizontal, 11)
         .padding(.vertical, 6)
         .frame(minWidth: 96, maxWidth: 190)
-        .glassEffect(
-            isSelected
-                ? .regular.tint(Theme.accentColor.opacity(0.22)).interactive()
-                : .regular.interactive(),
-            in: .rect(cornerRadius: Theme.cornerRadius, style: .continuous)
-        )
-        // Lets the selected chip morph between positions rather than cross-fade.
-        .glassEffectID(session.id, in: namespace)
+        .modifier(ChipSurface(isSelected: isSelected, id: session.id, namespace: namespace))
         .onHover { hovering = $0 }
         .onTapGesture(perform: select)
         .animation(.smooth(duration: 0.22), value: isSelected)
+    }
+}
+
+/// The chip's glass, with its morph identity. On macOS 26 the selected chip
+/// morphs between positions instead of cross-fading, which is the whole reason
+/// `glassEffectID` exists.
+private struct ChipSurface: ViewModifier {
+    let isSelected: Bool
+    let id: Session.ID
+    let namespace: Namespace.ID
+
+    func body(content: Content) -> some View {
+        if #available(macOS 26.0, *) {
+            content
+                .glassEffect(
+                    isSelected
+                        ? .regular.tint(Theme.accentColor.opacity(0.22)).interactive()
+                        : .regular.interactive(),
+                    in: .rect(cornerRadius: Theme.cornerRadius, style: .continuous)
+                )
+                .glassEffectID(id, in: namespace)
+        } else {
+            content
+                .background(
+                    .ultraThinMaterial,
+                    in: .rect(cornerRadius: Theme.cornerRadius, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: Theme.cornerRadius, style: .continuous)
+                        .strokeBorder(
+                            Theme.accentColor.opacity(isSelected ? 0.45 : 0.10),
+                            lineWidth: isSelected ? 1 : 0.5)
+                )
+        }
     }
 }
 

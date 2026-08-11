@@ -39,22 +39,30 @@ fetch_kernel() {
     mv "${tarball}.part" "$tarball"
   fi
 
-  log "extracting kernel"
-  # `vmlinux.container` is a SYMLINK to a versioned image, so extracting that
-  # one member alone yields a dangling link. Pull every vmlinux* entry and then
-  # resolve the link to the real file.
+  # Don't guess at Kata's layout — ask the archive. `vmlinux.container` is a
+  # symlink to a versioned image, and glob patterns behave differently between
+  # bsdtar and GNU tar, so list the real member names first and extract those.
+  log "locating kernel in archive"
   rm -f "${CACHE}"/vmlinux*
-  tar -xJf "$tarball" -C "$CACHE" \
-      --strip-components=4 \
-      'opt/kata/share/kata-containers/vmlinux*' \
-    || die "no vmlinux* found — Kata may have changed its layout"
 
-  local src="${CACHE}/vmlinux.container"
-  if [ -L "$src" ]; then
-    src="${CACHE}/$(basename "$(readlink "$src")")"
-    log "resolved symlink -> $(basename "$src")"
-  fi
-  [ -f "$src" ] || die "resolved kernel $src does not exist"
+  local members=""
+  while IFS= read -r line; do
+    members="${members}${line}
+"
+  done < <(tar -tJf "$tarball" | grep -E 'kata-containers/vmlinux[^/]*$' || true)
+
+  [ -n "$members" ] || die "no vmlinux entries in archive — Kata changed its layout"
+  printf '%s' "$members" | sed 's/^/      /'
+
+  # shellcheck disable=SC2086
+  tar -xJf "$tarball" -C "$CACHE" --strip-components=4 $(printf '%s ' $members) \
+    || die "extraction failed"
+
+  # Pick the largest real file — skips the dangling .container symlink.
+  local src
+  src=$(find "$CACHE" -maxdepth 1 -name 'vmlinux*' -type f -size +1M 2>/dev/null | sort | tail -1)
+  [ -n "$src" ] || die "no real kernel file extracted (only symlinks?)"
+  log "using $(basename "$src")"
 
   cp "$src" "${ASSETS}/vmlinux"
 

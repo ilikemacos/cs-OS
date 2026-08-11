@@ -38,7 +38,11 @@ struct TerminalPane: NSViewRepresentable {
     /// cannot be `@MainActor` without the conformance crossing isolation.
     /// Instead it is nonisolated and every callback re-enters the main actor via
     /// `assumeIsolated` — sound because AppKit only ever calls these on main.
-    final class Coordinator: NSObject, TerminalViewDelegate {
+    ///
+    /// `@unchecked Sendable` is the price of that: the callbacks hand `self` to
+    /// a `@MainActor` closure, which the compiler cannot prove is safe. It is —
+    /// every stored property below is written and read only on the main actor.
+    final class Coordinator: NSObject, TerminalViewDelegate, @unchecked Sendable {
         private nonisolated(unsafe) let session: Session
         private nonisolated(unsafe) weak var view: TerminalView?
         private nonisolated(unsafe) var pump: Task<Void, Never>?

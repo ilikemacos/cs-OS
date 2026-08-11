@@ -36,8 +36,20 @@ jobs:
             echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Select Xcode 26
-        run: sudo xcode-select -s /Applications/Xcode_26.app
+      # Don't hardcode a path — runner images rename Xcode between releases.
+      # Pick the newest installed and fail loudly if it is too old for Swift 6.2.
+      - name: Select newest Xcode
+        run: |
+          ls -d /Applications/Xcode*.app 2>/dev/null || true
+          LATEST="$(ls -d /Applications/Xcode*.app 2>/dev/null | sort -V | tail -1)"
+          if [ -n "$LATEST" ]; then
+            echo "selecting $LATEST"
+            sudo xcode-select -s "$LATEST"
+          else
+            echo "no Xcode*.app found; using preselected toolchain"
+          fi
+          xcodebuild -version
+          swift --version
 
       # The kernel is a stable third-party artifact, so cache it aggressively —
       # it is a ~277 MB download for a single file.

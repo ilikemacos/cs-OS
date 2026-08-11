@@ -39,14 +39,30 @@ fetch_kernel() {
     mv "${tarball}.part" "$tarball"
   fi
 
-  log "extracting vmlinux.container"
-  # Only one member is needed; extracting everything would unpack ~1 GiB.
+  log "extracting kernel"
+  # `vmlinux.container` is a SYMLINK to a versioned image, so extracting that
+  # one member alone yields a dangling link. Pull every vmlinux* entry and then
+  # resolve the link to the real file.
+  rm -f "${CACHE}"/vmlinux*
   tar -xJf "$tarball" -C "$CACHE" \
-      --strip-components=5 \
-      'opt/kata/share/kata-containers/vmlinux.container' \
-    || die "vmlinux.container not found — Kata may have changed its layout"
+      --strip-components=4 \
+      'opt/kata/share/kata-containers/vmlinux*' \
+    || die "no vmlinux* found — Kata may have changed its layout"
 
-  mv "${CACHE}/vmlinux.container" "${ASSETS}/vmlinux"
+  local src="${CACHE}/vmlinux.container"
+  if [ -L "$src" ]; then
+    src="${CACHE}/$(basename "$(readlink "$src")")"
+    log "resolved symlink -> $(basename "$src")"
+  fi
+  [ -f "$src" ] || die "resolved kernel $src does not exist"
+
+  cp "$src" "${ASSETS}/vmlinux"
+
+  # A zero-byte kernel silently produces an app that cannot boot anything.
+  local size
+  size=$(wc -c < "${ASSETS}/vmlinux" | tr -d ' ')
+  [ "$size" -gt 1000000 ] || die "kernel is only ${size} bytes — extraction failed"
+
   log "kernel ready ($(du -h "${ASSETS}/vmlinux" | cut -f1))"
 }
 

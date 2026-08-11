@@ -58,7 +58,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .build/assets
-          key: csos-assets-kata3.17.0-cz0.33.3-v1
+          key: csos-assets-kata3.17.0-cz0.33.3-v2
 
       # Just a kernel download — the guest init is pulled from Apple's public
       # OCI image at runtime, so nothing here needs virtualization.

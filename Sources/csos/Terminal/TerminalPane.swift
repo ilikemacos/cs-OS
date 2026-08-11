@@ -43,7 +43,7 @@ struct TerminalPane: NSViewRepresentable {
     /// a `@MainActor` closure, which the compiler cannot prove is safe. It is —
     /// every stored property below is written and read only on the main actor.
     final class Coordinator: NSObject, TerminalViewDelegate, @unchecked Sendable {
-        private nonisolated(unsafe) let session: Session
+        private let session: Session
         private nonisolated(unsafe) weak var view: TerminalView?
         private nonisolated(unsafe) var pump: Task<Void, Never>?
 

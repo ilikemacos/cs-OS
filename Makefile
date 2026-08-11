@@ -101,11 +101,18 @@ bundle: build assets
 .PHONY: sign
 sign:
 	$(call log,"signing (ad-hoc) with virtualization entitlement")
+	@plutil -lint Resources/csos.entitlements >/dev/null \
+	  || { echo "entitlements plist is malformed"; exit 1; }
 	@codesign --force --sign - \
 	    --entitlements Resources/csos.entitlements \
 	    --timestamp=none \
-	    "$(APP)" >/dev/null 2>&1
+	    "$(APP)"
 	@codesign --verify --verbose=1 "$(APP)" 2>&1 | sed 's/^/    /'
+	@codesign -d --entitlements - --xml "$(APP)" 2>/dev/null \
+	  | plutil -convert xml1 -o - - 2>/dev/null \
+	  | grep -q 'com.apple.security.virtualization' \
+	  && echo "    virtualization entitlement present" \
+	  || echo "    WARNING: virtualization entitlement missing from signature"
 
 # ---------------------------------------------------------------- archive
 

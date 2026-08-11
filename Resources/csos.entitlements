@@ -16,3 +16,4 @@
          needs vmnet plus arbitrary writable block devices; turning it on breaks
          the guest before it boots. -->
 </dict>
+</plist>

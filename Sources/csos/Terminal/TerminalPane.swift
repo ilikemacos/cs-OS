@@ -124,6 +124,29 @@ struct TerminalPane: NSViewRepresentable {
             NSSound.beep()
         }
 
+        /// OSC 52 — the guest asking to put something on the host clipboard.
+        func clipboardCopy(source: TerminalView, content: Data) {
+            guard let text = String(data: content, encoding: .utf8) else { return }
+            MainActor.assumeIsolated {
+                let pb = NSPasteboard.general
+                pb.clearContents()
+                pb.setString(text, forType: .string)
+            }
+        }
+
+        func clipboardRead(source: TerminalView) -> Data? {
+            MainActor.assumeIsolated {
+                NSPasteboard.general.string(forType: .string)?.data(using: .utf8)
+            }
+        }
+
+        /// iTerm2 inline-image protocol. cs-OS renders text only, so the payload
+        /// is dropped rather than half-drawn.
+        func iTermContent(source: TerminalView, content: ArraySlice<UInt8>) {}
+
+        /// Fires only when `notifyUpdateChanges` is enabled, which it isn't.
+        func rangeChanged(source: TerminalView, startY: Int, endY: Int) {}
+
         deinit { pump?.cancel() }
     }
 }

@@ -33,40 +33,30 @@ make          # compile + bundle dist/cs-OS.app
 make run
 ```
 
-### Bootstrapping the initfs
+### The guest init
 
-This is the one step that cannot run in CI. The guest init (`vminitd`) is a static
-Swift binary compiled *inside a Linux container*, which needs nested
-virtualization — GitHub's macOS runners do not have it.
+cs-OS does not build or bundle the Linux guest init. Apple publishes `vminitd` as
+a public OCI image, and the app resolves it at runtime:
 
-So it gets built **once**, on a real Apple silicon Mac with the
-[`container`](https://github.com/apple/container) CLI installed:
-
-```sh
-make assets                       # produces .build/assets/initfs.ext4
-gh release create initfs-v1 .build/assets/initfs.ext4
-shasum -a 256 .build/assets/initfs.ext4
+```
+ghcr.io/apple/containerization/vminit:0.33.3
 ```
 
-Then set two repo variables so CI can fetch it:
+It is pulled on first launch and cached in the image store, so later launches are
+offline. **The tag must track the Containerization version pinned in
+`Package.swift`** — the host↔guest vsock/gRPC contract is versioned together, so
+bump both or neither.
 
-| Variable | Value |
-|---|---|
-| `CSOS_INITFS_URL` | download URL of the released `initfs.ext4` |
-| `CSOS_INITFS_SHA256` | its SHA-256 |
-
-`scripts/fetch-assets.sh` honours `CSOS_INITFS_URL` and skips the container build
-entirely when it is set. It only needs redoing when the Containerization version
-is bumped.
+This is why the build needs no Linux toolchain, no
+[`container`](https://github.com/apple/container) CLI, and no nested
+virtualization: `make assets` is just a kernel download.
 
 ### Build-host dependencies
 
 | Dependency | Needed for | Notes |
 |---|---|---|
 | Xcode 26 | Swift 6.2 toolchain | CI runner provides it |
-| [`container`](https://github.com/apple/container) CLI | initfs bootstrap only | one-time; **end users never need it** |
 | `curl`, `tar`, `unzip` | asset fetch | system-provided |
-| `e2fsck` / `resize2fs` | shrinking the initfs | optional; skipped if absent |
 
 ## Layout
 

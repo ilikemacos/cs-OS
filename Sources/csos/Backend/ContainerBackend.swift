@@ -13,10 +13,11 @@ actor ContainerBackend: LinuxBackend {
 
     // MARK: Runtime assets
 
-    /// Kernel + initfs live in the bundle; the writable state root does not.
+    /// Only the kernel ships in the bundle. The guest init comes from Apple's
+    /// published OCI image (see `initfsReference`), which means cs-OS needs no
+    /// Linux build toolchain to produce a release — just a kernel download.
     struct Assets {
         var kernel: URL
-        var initfs: URL
         var stateRoot: URL
 
         /// Resolve from the .app bundle, falling back to `./.build/assets` so
@@ -35,16 +36,18 @@ actor ContainerBackend: LinuxBackend {
 
             for dir in candidates {
                 let kernel = dir.appendingPathComponent("vmlinux")
-                let initfs = dir.appendingPathComponent("initfs.ext4")
-                if FileManager.default.fileExists(atPath: kernel.path),
-                    FileManager.default.fileExists(atPath: initfs.path)
-                {
-                    return Assets(kernel: kernel, initfs: initfs, stateRoot: support)
+                if FileManager.default.fileExists(atPath: kernel.path) {
+                    return Assets(kernel: kernel, stateRoot: support)
                 }
             }
-            throw BackendError.missingAsset("vmlinux + initfs.ext4")
+            throw BackendError.missingAsset("vmlinux")
         }
     }
+
+    /// Apple publishes the guest init (`vminitd`) as a public OCI image. The tag
+    /// must track the Containerization version pinned in Package.swift — the
+    /// vsock/gRPC contract between host and guest is versioned together.
+    static let initfsReference = "ghcr.io/apple/containerization/vminit:0.33.3"
 
     // MARK: State
 
@@ -76,19 +79,11 @@ actor ContainerBackend: LinuxBackend {
     func start() async throws {
         let kernel = Kernel(path: assets.kernel, platform: .linuxArm)
 
-        // The initfs is a read-only ext4 block device shipped in the bundle.
-        // Passing it directly avoids resolving `vminit:latest` from an image
-        // store, which would require a registry round-trip on first launch.
-        let initfs = Mount.block(
-            format: "ext4",
-            source: assets.initfs.path,
-            destination: "/",
-            options: ["ro"]
-        )
-
-        let manager = try ContainerManager(
+        // Resolves the guest init from the registry on first launch and caches
+        // it in the image store; subsequent launches are offline.
+        let manager = try await ContainerManager(
             kernel: kernel,
-            initfs: initfs,
+            initfsReference: Self.initfsReference,
             root: assets.stateRoot,
             network: try VmnetNetwork()
         )

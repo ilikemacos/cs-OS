@@ -56,11 +56,11 @@ preflight:
 
 # ---------------------------------------------------------------- assets
 
-$(ASSETS)/vmlinux $(ASSETS)/initfs.ext4:
+$(ASSETS)/vmlinux:
 	@bash scripts/fetch-assets.sh
 
 .PHONY: assets
-assets: $(ASSETS)/vmlinux $(ASSETS)/initfs.ext4
+assets: $(ASSETS)/vmlinux
 
 # ---------------------------------------------------------------- compile
 
@@ -83,8 +83,7 @@ bundle: build assets
 	@sed -e 's/__VERSION__/$(VERSION)/' -e 's/__BUILD__/$(BUILD)/' \
 	    Resources/Info.plist > "$(CONTENTS)/Info.plist"
 
-	@cp "$(ASSETS)/vmlinux"     "$(RES_DIR)/linux/vmlinux"
-	@cp "$(ASSETS)/initfs.ext4" "$(RES_DIR)/linux/initfs.ext4"
+	@cp "$(ASSETS)/vmlinux" "$(RES_DIR)/linux/vmlinux"
 	@cp $(ASSETS)/JetBrainsMonoNL-*.ttf "$(RES_DIR)/" 2>/dev/null || true
 	@[ -f Resources/AppIcon.icns ] && cp Resources/AppIcon.icns "$(RES_DIR)/" || true
 

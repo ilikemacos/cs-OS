@@ -92,7 +92,7 @@ const page = `<!DOCTYPE html>
 
             <p class="hero-meta">
               <span class="pill"><span class="pill-dot"></span>v0.1.0 · not yet released</span>
-              &nbsp;·&nbsp; ~140 MB installed &nbsp;·&nbsp; no sudo &nbsp;·&nbsp; no Xcode
+              &nbsp;·&nbsp; ~110 MB installed &nbsp;·&nbsp; no sudo &nbsp;·&nbsp; no Xcode
             </p>
 
             <div class="hero-actions">
@@ -205,7 +205,7 @@ Mem:    1024   118   906
               <tbody>
                 <tr><td>macOS</td><td class="mono">26.0 or later</td></tr>
                 <tr><td>Chip</td><td class="mono">Apple silicon only</td></tr>
-                <tr><td>Disk</td><td class="mono">~140 MB</td></tr>
+                <tr><td>Disk</td><td class="mono">~110 MB</td></tr>
                 <tr><td>Memory</td><td class="mono">1 GB per session</td></tr>
                 <tr><td>Network</td><td class="mono">first launch only</td></tr>
               </tbody>
@@ -216,7 +216,7 @@ Mem:    1024   118   906
             <table class="compare">
               <tbody>
                 <tr><td>Linux kernel</td><td class="mono">~40 MB</td></tr>
-                <tr><td>Guest init</td><td class="mono">~30 MB</td></tr>
+                <tr><td>Guest init</td><td class="mono">on demand</td></tr>
                 <tr><td>csos binary</td><td class="mono">~70 MB</td></tr>
                 <tr><td>Font &amp; icon</td><td class="mono">~1.5 MB</td></tr>
                 <tr><td>Base image</td><td class="mono">+3.5 MB</td></tr>

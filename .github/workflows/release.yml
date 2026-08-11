@@ -48,21 +48,11 @@ jobs:
           path: .build/assets
           key: csos-assets-kata3.17.0-cz0.33.3-v1
 
-      # CSOS_INITFS_URL must point at a prebuilt initfs.ext4. The runner cannot
-      # build one itself: that needs nested virtualization, which GitHub's macOS
-      # runners do not provide. Build it once on a real Mac, attach it to a
-      # release, and set these two repo variables.
+      # Just a kernel download — the guest init is pulled from Apple's public
+      # OCI image at runtime, so nothing here needs virtualization.
       - name: Build Linux assets
         if: steps.assets-cache.outputs.cache-hit != 'true'
-        env:
-          CSOS_INITFS_URL: ${{ vars.CSOS_INITFS_URL }}
-          CSOS_INITFS_SHA256: ${{ vars.CSOS_INITFS_SHA256 }}
-        run: |
-          if [ -z "$CSOS_INITFS_URL" ]; then
-            echo "::error::CSOS_INITFS_URL repo variable is not set. See README > Bootstrapping the initfs."
-            exit 1
-          fi
-          bash scripts/fetch-assets.sh
+        run: bash scripts/fetch-assets.sh
 
       - name: Cache SwiftPM dependencies
         uses: actions/cache@v4

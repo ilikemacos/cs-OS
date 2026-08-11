@@ -54,14 +54,18 @@ fetch_kernel() {
   [ -n "$members" ] || die "no vmlinux entries in archive — Kata changed its layout"
   printf '%s' "$members" | sed 's/^/      /'
 
+  # No --strip-components: archive paths start with "./", so the count is easy
+  # to get wrong. Extract as-is and locate the file afterwards.
+  rm -rf "${CACHE}/opt"
   # shellcheck disable=SC2086
-  tar -xJf "$tarball" -C "$CACHE" --strip-components=4 $(printf '%s ' $members) \
-    || die "extraction failed"
+  tar -xJf "$tarball" -C "$CACHE" $(printf '%s ' $members) || die "extraction failed"
 
-  # Pick the largest real file — skips the dangling .container symlink.
+  # Kata ships GPU and dragonball variants alongside the stock kernel. Take the
+  # plain `vmlinux-<version>` — the others carry drivers cs-OS has no use for.
   local src
-  src=$(find "$CACHE" -maxdepth 1 -name 'vmlinux*' -type f -size +1M 2>/dev/null | sort | tail -1)
-  [ -n "$src" ] || die "no real kernel file extracted (only symlinks?)"
+  src=$(find "${CACHE}/opt" -type f -name 'vmlinux-*' -size +1M 2>/dev/null \
+        | grep -vE 'nvidia|dragonball|\.container$' | sort -V | tail -1)
+  [ -n "$src" ] || die "no stock kernel found among extracted files"
   log "using $(basename "$src")"
 
   cp "$src" "${ASSETS}/vmlinux"

@@ -87,4 +87,13 @@ final class SessionStore {
     var current: Session? {
         sessions.first { $0.id == selected } ?? sessions.first
     }
+
+    /// Cycle sessions with ⌘⇧[ / ⌘⇧], the standard Mac tab shortcuts. Wraps,
+    /// because stopping at the ends is a surprise in a tab strip.
+    func selectRelative(_ offset: Int) {
+        guard !sessions.isEmpty else { return }
+        let index = sessions.firstIndex { $0.id == selected } ?? 0
+        let next = (index + offset % sessions.count + sessions.count) % sessions.count
+        selected = sessions[next].id
+    }
 }

@@ -31,7 +31,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        arch: [arm64, x86_64]
+        arch: [arm64]
 
     steps:
       - uses: actions/checkout@v4
@@ -90,8 +90,7 @@ jobs:
           V="${{ steps.ver.outputs.version }}"
           OUT="csos-guest-${V}"
           mkdir -p "$OUT"
-          mv staging/guest-arm64  "$OUT/arm64"
-          mv staging/guest-x86_64 "$OUT/x86_64"
+          mv staging/guest-arm64 "$OUT/arm64"
 
           # Manifest keys are arch-relative paths — GuestBundle.swift verifies
           # every one of these at launch before booting anything.
@@ -99,7 +98,7 @@ jobs:
           import hashlib, json, os, sys
           root = sys.argv[1]
           out = {}
-          for arch in ("arm64", "x86_64"):
+          for arch in ("arm64",):
               for name in ("kernel", "initramfs.cpio.gz", "rootfs.erofs"):
                   p = os.path.join(root, arch, name)
                   h = hashlib.sha256()
@@ -152,7 +151,7 @@ jobs:
             "csos-guest-${V}.tar.gz.sha256" \
             SOURCES.md \
             --title "cs-OS guest v${V}" \
-            --notes "Linux kernel 6.12.41 + Alpine 3.21.3 guest for cs-OS, arm64 and x86_64." \
+            --notes "Linux kernel 6.12.41 + Alpine 3.21.3 guest for cs-OS (arm64)." \
             || gh release upload "guest-v${V}" \
                  "csos-guest-${V}.tar.gz" \
                  "csos-guest-${V}.tar.gz.sha256" \

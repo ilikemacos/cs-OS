@@ -97,7 +97,7 @@ jobs:
         run: |
           set -euo pipefail
           V="${{ steps.ver.outputs.version }}"
-          A="dist/cs-OS-${V}-macos-universal.tar.gz"
+          A="dist/cs-OS-${V}-macos-arm64.tar.gz"
           gh release create "v${V}" "$A" "${A}.sha256" \
             --title "cs-OS v${V}" \
             --notes-file CHANGELOG.md \

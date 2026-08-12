@@ -34,10 +34,9 @@ fi
 [ "$(uname -s)" = "Darwin" ] || die "cs-OS is macOS only (found $(uname -s))."
 
 ARCH="$(uname -m)"
-case "$ARCH" in
-  arm64|x86_64) ;;
-  *) die "unsupported architecture: $ARCH (need arm64 or x86_64)." ;;
-esac
+if [ "$ARCH" != "arm64" ]; then
+  die "cs-OS requires an Apple silicon Mac (found $ARCH)."
+fi
 
 MACOS_VER="$(sw_vers -productVersion)"
 MACOS_MAJOR="$(echo "$MACOS_VER" | cut -d. -f1)"
@@ -58,12 +57,6 @@ for tool in curl shasum tar mkdir; do
   command -v "$tool" >/dev/null 2>&1 || die "required tool not found: $tool"
 done
 
-# Virtualization.framework is unavailable inside a VM on Intel, and cs-OS is a
-# VM host — fail here rather than at a confusing first launch.
-if [ "$ARCH" = "x86_64" ] && sysctl -n machdep.cpu.features 2>/dev/null | grep -q VMM; then
-  die "cs-OS cannot run inside a virtual machine (nested virtualization unavailable)."
-fi
-
 # ------------------------------------------------------------------ resolve
 
 info "Resolving latest release…"
@@ -73,7 +66,7 @@ META="$(curl -fsSL "$API" 2>/dev/null)" || die "could not reach GitHub to resolv
 VERSION="$(printf '%s' "$META" | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"v\{0,1\}\([^"]*\)".*/\1/p' | head -1)"
 [ -n "$VERSION" ] || die "could not determine the latest version."
 
-ARTIFACT="cs-OS-${VERSION}-macos-universal.tar.gz"
+ARTIFACT="cs-OS-${VERSION}-macos-arm64.tar.gz"
 URL="https://github.com/$REPO/releases/download/v${VERSION}/${ARTIFACT}"
 SUM_URL="${URL}.sha256"
 

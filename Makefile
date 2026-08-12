@@ -25,8 +25,9 @@ export DEVELOPER_DIR := /Library/Developer/CommandLineTools
 VERSION     ?= 0.1.0
 BUILD       ?= $(shell date +%Y%m%d%H%M)
 DEPLOY_TGT  ?= 14.0
-# Universal by default: the macOS 14 floor exists to serve Intel machines.
-ARCHS       ?= arm64 x86_64
+# Apple silicon only. Virtualization.framework on Intel Macs is a dead end for
+# this product, and every Mac that can run the guest well is arm64.
+ARCHS       ?= arm64
 
 APP_NAME    := cs-OS
 BINARY      := csos
@@ -46,7 +47,7 @@ SWIFTTERM_SRC  := $(VENDOR)/SwiftTerm
 
 SDK         := $(shell xcrun --show-sdk-path)
 SOURCES     := $(shell find $(ROOT)/Sources/csos -name '*.swift')
-ARTIFACT    := $(APP_NAME)-$(VERSION)-macos-universal.tar.gz
+ARTIFACT    := $(APP_NAME)-$(VERSION)-macos-arm64.tar.gz
 
 CYAN := \033[38;5;110m
 RESET := \033[0m
@@ -114,10 +115,8 @@ build: preflight deps
 	    -framework Virtualization \
 	    $(SOURCES); \
 	done
-	$(call log,"lipo -> universal")
 	@mkdir -p $(BUILD_DIR)
-	@lipo -create $(foreach a,$(ARCHS),$(BUILD_DIR)/$(a)/$(BINARY)) \
-	   -output $(BUILD_DIR)/$(BINARY)
+	@cp $(BUILD_DIR)/arm64/$(BINARY) $(BUILD_DIR)/$(BINARY)
 	@lipo -info $(BUILD_DIR)/$(BINARY)
 
 # ---------------------------------------------------------------- bundle

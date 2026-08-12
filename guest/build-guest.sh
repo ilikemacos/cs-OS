@@ -133,12 +133,18 @@ log "building busybox + paned"
 cd "$WORK"
 curl -fsSL "https://busybox.net/downloads/busybox-${BUSYBOX_VER}.tar.bz2" | tar -xj
 cd "busybox-${BUSYBOX_VER}"
-make $MAKEOPTS defconfig
+# BusyBox's kconfig is not the kernel's: it has no ARCH= concept and no
+# `olddefconfig` target. Use `yes "" | make oldconfig` to accept defaults for
+# anything newly exposed by the edits below.
+BB_MAKEOPTS="-j$(nproc) ${CROSS:+CROSS_COMPILE=$CROSS}"
+make $BB_MAKEOPTS defconfig
 # Static: the initramfs has no libc of its own.
 sed -i 's/^# CONFIG_STATIC is not set/CONFIG_STATIC=y/' .config
-sed -i 's/^CONFIG_TC=y/CONFIG_TC=n/' .config    # fails to build on modern headers
-make $MAKEOPTS olddefconfig
-make $MAKEOPTS busybox
+sed -i 's/^CONFIG_TC=y/# CONFIG_TC is not set/' .config   # fails on modern headers
+# Needs a working host TLS/PAM stack we do not have; not needed in the guest.
+sed -i 's/^CONFIG_PAM=y/# CONFIG_PAM is not set/' .config
+yes "" | make $BB_MAKEOPTS oldconfig >/dev/null
+make $BB_MAKEOPTS busybox
 BUSYBOX="$PWD/busybox"
 
 # The guest agent. Static against musl so it needs nothing at runtime.

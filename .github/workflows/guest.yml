@@ -29,7 +29,7 @@ jobs:
   build:
     runs-on: ubuntu-24.04
     strategy:
-      fail-fast: true
+      fail-fast: false
       matrix:
         arch: [arm64, x86_64]
 

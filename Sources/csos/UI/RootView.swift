@@ -70,6 +70,16 @@ struct RootView: View {
     }
 
     private func subtitle(for session: Session) -> String {
+        if session.kind == .macOS {
+            switch session.macGuest?.phase {
+            case .running:                      return "macOS desktop"
+            case .installing:                   return "Installing macOS…"
+            case .downloadingRestoreImage:      return "Downloading macOS…"
+            case .needsRestoreImage:            return "Setup required"
+            case .failed:                       return "Failed to start"
+            default:                            return "Not started"
+            }
+        }
         switch session.state {
         case .running: return session.workingDirectory ?? session.image
         case .booting: return "Starting…"
@@ -97,10 +107,15 @@ struct RootView: View {
                 .help("New session (⌘T)")
             } else {
                 Button { store.newSession() } label: {
-                    Label("New Session", systemImage: "plus")
+                    Label("New Linux Session", systemImage: "plus")
                 }
-                .help("New session (⌘T)")
+                .help("New Linux session (⌘T)")
             }
+
+            Button { store.newMacSession() } label: {
+                Label("macOS Desktop", systemImage: "macwindow.on.rectangle")
+            }
+            .help("Open a full macOS desktop where .dmg and .pkg installers work")
         }
     }
 }
@@ -130,6 +145,7 @@ private struct SessionRow: View {
     }
 
     private var icon: String {
+        if session.kind == .macOS { return "macwindow.on.rectangle" }
         switch session.state {
         case .running: return "terminal.fill"
         case .booting: return "hourglass"
@@ -140,6 +156,7 @@ private struct SessionRow: View {
     }
 
     private var tint: Color {
+        if session.kind == .macOS { return Theme.accentColor }
         switch session.state {
         case .running: return Theme.statusRunning
         case .booting: return Theme.statusBooting
@@ -161,7 +178,11 @@ private struct SessionDetail: View {
         ZStack {
             WindowBackdrop().ignoresSafeArea()
 
-            content
+            if session.kind == .macOS, let guest = session.macGuest {
+                DesktopPane(guest: guest)
+            } else {
+                content
+            }
         }
         // TerminalPane used to start the session as a side effect of being
         // created. It is no longer built until the guest is running, so the

@@ -5,8 +5,21 @@ import Observation
 @MainActor
 @Observable
 final class Session: Identifiable {
+    /// What this session actually is. Both kinds live in the same sidebar and
+    /// the same window; only the detail view differs.
+    enum Kind: Equatable {
+        /// Linux under the bundled microVM: sub-second boot, ~120MB idle.
+        case linux
+        /// A real macOS guest: the only kind where .dmg/.pkg installers work.
+        case macOS
+    }
+
     let id = UUID()
+    let kind: Kind
     let image: String
+
+    /// Non-nil only for `.macOS` sessions.
+    private(set) var macGuest: MacGuest?
 
     var title: String
     var workingDirectory: String?
@@ -25,12 +38,25 @@ final class Session: Identifiable {
         image.split(separator: "/").last.map(String.init) ?? image
     }
 
-    init(image: String = "docker.io/library/alpine:latest") {
+    init(kind: Kind = .linux, image: String = "docker.io/library/alpine:latest") {
+        self.kind = kind
         self.image = image
-        self.title = image.split(separator: "/").last.map(String.init) ?? image
+        switch kind {
+        case .linux:
+            self.title = image.split(separator: "/").last.map(String.init) ?? image
+        case .macOS:
+            self.title = "macOS"
+            self.macGuest = MacGuest()
+        }
     }
 
     func startIfNeeded() async throws {
+        // macOS guests drive their own phase machine inside MacGuest; there is
+        // no LinuxBackend involved.
+        if kind == .macOS {
+            await macGuest?.start()
+            return
+        }
         guard backend == nil else { return }
         state = .booting
         do {
@@ -46,6 +72,7 @@ final class Session: Identifiable {
     }
 
     func close() async {
+        await macGuest?.stop()
         await backend?.stop()
         backend = nil
         state = .exited
@@ -68,6 +95,20 @@ final class SessionStore {
     ]
 
     init() { newSession() }
+
+    /// Starts a full macOS desktop session. Only one is offered: Apple's
+    /// licence permits two macOS VMs per host and one is plenty here.
+    @discardableResult
+    func newMacSession() -> Session {
+        if let existing = sessions.first(where: { $0.kind == .macOS }) {
+            selected = existing.id
+            return existing
+        }
+        let session = Session(kind: .macOS)
+        sessions.append(session)
+        selected = session.id
+        return session
+    }
 
     @discardableResult
     func newSession(image: String = presets[0]) -> Session {
